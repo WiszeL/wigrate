@@ -14,7 +14,7 @@ func FindRoot() (string, error) {
 		}
 	}
 
-	// go.mod not found means in production environtment, use executable dir instead
+	// go.mod not found means in production environment, use executable dir instead
 	if executable, err := os.Executable(); err == nil {
 		return filepath.Dir(executable), nil
 	}

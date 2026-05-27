@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -13,11 +14,12 @@ func readGeneratedSchema(module migrationModule, entityName string, before *migr
 		return tableSchema{}, err
 	}
 
+	// Sorting migration files by name
 	sort.Slice(files, func(i int, j int) bool {
 		return files[i].baseName < files[j].baseName
 	})
 
-	// Replay generated up migrations to reconstruct the schema state.
+	// Replaying up migration files to reconstruct schema state.
 	schema := tableSchema{name: tableNameFromEntity(entityName)}
 	for _, file := range files {
 		if file.direction != "up" {
@@ -29,7 +31,7 @@ func readGeneratedSchema(module migrationModule, entityName string, before *migr
 
 		content, err := os.ReadFile(file.path)
 		if err != nil {
-			return tableSchema{}, err
+			return tableSchema{}, fmt.Errorf("read migration file %s: %w", file.path, err)
 		}
 		applyGeneratedSQL(&schema, string(content))
 	}
@@ -40,7 +42,7 @@ func readGeneratedSchema(module migrationModule, entityName string, before *migr
 func findEntityMigrationFiles(module migrationModule, entityName string) ([]migrationFile, error) {
 	entries, err := os.ReadDir(module.migrationDir)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read migration dir: %w", err)
 	}
 
 	var files []migrationFile
@@ -60,12 +62,14 @@ func findEntityMigrationFiles(module migrationModule, entityName string) ([]migr
 
 func applyGeneratedSQL(schema *tableSchema, sql string) {
 	// This parser only needs to understand SQL emitted by this package.
+	// Cleaning and skipping blank/DDL lines
 	for line := range strings.SplitSeq(sql, "\n") {
 		line = cleanGeneratedSQLLine(line)
 		if shouldSkipGeneratedSQLLine(line) {
 			continue
 		}
 
+		// Dispatching by SQL prefix
 		switch {
 		case strings.HasPrefix(line, "ADD CONSTRAINT ") && strings.Contains(line, " UNIQUE "):
 			if columnName, ok := parseGeneratedUniqueConstraint(line); ok {
@@ -103,6 +107,7 @@ func cleanGeneratedSQLLine(line string) string {
 	line = strings.TrimSpace(line)
 	line = strings.TrimSuffix(line, ",")
 	line = strings.TrimSuffix(line, ";")
+
 	return line
 }
 
@@ -122,10 +127,12 @@ func parseGeneratedColumn(line string) (columnSchema, bool) {
 		return columnSchema{}, false
 	}
 
+	// Extracting column name
 	column := columnSchema{name: parts[0]}
+
+	// Extracting data type (may contain spaces, e.g. DOUBLE PRECISION)
 	var dataTypeParts []string
 	for i := 1; i < len(parts); i++ {
-		// Data types may contain spaces, e.g. DOUBLE PRECISION.
 		if parts[i] == "PRIMARY" || parts[i] == "NOT" {
 			break
 		}
@@ -136,6 +143,7 @@ func parseGeneratedColumn(line string) (columnSchema, bool) {
 	}
 	column.dataType = strings.Join(dataTypeParts, " ")
 
+	// Parsing constraints
 	for i := 1 + len(dataTypeParts); i < len(parts); i++ {
 		switch parts[i] {
 		case "PRIMARY":
@@ -172,10 +180,12 @@ func parseGeneratedAlterForeignKey(line string) (foreignKeySchema, bool) {
 	if len(parts) != 2 {
 		return foreignKeySchema{}, false
 	}
+
 	return parseGeneratedForeignKey("FOREIGN KEY " + parts[1])
 }
 
 func parseGeneratedForeignKey(line string) (foreignKeySchema, bool) {
+	// Extracting referencing column
 	columnStart := strings.Index(line, "(")
 	columnEnd := strings.Index(line, ")")
 	_, after, ok := strings.Cut(line, " REFERENCES ")
@@ -183,6 +193,7 @@ func parseGeneratedForeignKey(line string) (foreignKeySchema, bool) {
 		return foreignKeySchema{}, false
 	}
 
+	// Extracting referenced table and column
 	reference := after
 	refTableEnd := strings.Index(reference, "(")
 	refColumnEnd := strings.Index(reference, ")")
@@ -196,6 +207,7 @@ func parseGeneratedForeignKey(line string) (foreignKeySchema, bool) {
 		refColumn: reference[refTableEnd+1 : refColumnEnd],
 	}
 
+	// Extracting ON DELETE action
 	if _, after, ok := strings.Cut(line, " ON DELETE "); ok {
 		foreignKey.onDelete = after
 	}
@@ -288,6 +300,7 @@ func findColumnIndex(columns []columnSchema, name string) (int, bool) {
 			return i, true
 		}
 	}
+
 	return 0, false
 }
 
@@ -297,5 +310,6 @@ func findForeignKeyIndex(foreignKeys []foreignKeySchema, columnName string) (int
 			return i, true
 		}
 	}
+
 	return 0, false
 }

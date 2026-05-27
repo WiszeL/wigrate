@@ -1,8 +1,10 @@
 package internal
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -10,6 +12,10 @@ import (
 
 func MigrateUp(moduleNames ...string) error {
 	return migrateModules("up", "", moduleNames...)
+}
+
+func MigrateStatus(moduleNames ...string) error {
+	return migrateModules("version", "", moduleNames...)
 }
 
 func MigrateDown(steps int, moduleNames ...string) error {
@@ -21,27 +27,32 @@ func MigrateDown(steps int, moduleNames ...string) error {
 }
 
 func migrateModules(direction string, steps string, moduleNames ...string) error {
+	// Finding the project root
 	root, err := FindRoot()
 	if err != nil {
 		return err
 	}
 
+	// Loading the database config
 	config, err := loadDatabaseConfig(root)
 	if err != nil {
 		return err
 	}
 
+	// Discovering the modules
 	modules, err := findModules()
 	if err != nil {
 		return err
 	}
 
+	// Filtering the modules
 	modules, err = filterModules(modules, moduleNames...)
 	if err != nil {
 		return err
 	}
 
 	for _, module := range modules {
+		// Running the migration
 		if ok, err := hasMigrationFiles(module); err != nil {
 			return err
 		} else if !ok {
@@ -58,6 +69,7 @@ func migrateModules(direction string, steps string, moduleNames ...string) error
 }
 
 func runMigrateCommand(module migrationModule, config databaseConfig, direction string, steps string) error {
+	// Building the migrate args
 	args := []string{
 		"-path", module.migrationDir,
 		"-database", config.urlForModule(module),
@@ -67,10 +79,12 @@ func runMigrateCommand(module migrationModule, config databaseConfig, direction 
 		args = append(args, steps)
 	}
 
+	// Executing the migrate command
 	if err := runCommand("migrate", args...); err != nil {
 		if isNoChangeError(err) {
 			return nil
 		}
+
 		return err
 	}
 
@@ -78,14 +92,16 @@ func runMigrateCommand(module migrationModule, config databaseConfig, direction 
 }
 
 func hasMigrationFiles(module migrationModule) (bool, error) {
+	// Reading the migration directory
 	entries, err := os.ReadDir(module.migrationDir)
-	if os.IsNotExist(err) {
+	if errors.Is(err, os.ErrNotExist) {
 		return false, nil
 	}
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("read migration dir: %w", err)
 	}
 
+	// Scanning for .sql files
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
@@ -101,5 +117,11 @@ func hasMigrationFiles(module migrationModule) (bool, error) {
 }
 
 func isNoChangeError(err error) bool {
+	// Checking via exit code
+	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
+		return exitErr.ExitCode() == 0
+	}
+
+	// Falling back to string matching
 	return strings.Contains(strings.ToLower(err.Error()), "no change")
 }

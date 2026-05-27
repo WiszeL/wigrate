@@ -7,11 +7,13 @@ import (
 )
 
 func makeInitMigration(module migrationModule, entityName string) error {
+	// Parsing entity schema
 	schema, err := parseEntitySchema(module, entityName)
 	if err != nil {
 		return err
 	}
 
+	// Running migrate CLI
 	if err := runCommand("migrate", "create", "-ext", "sql", "-dir", module.migrationDir, "-seq", "init_"+entityName); err != nil {
 		return err
 	}
@@ -25,6 +27,7 @@ func makeInitMigration(module migrationModule, entityName string) error {
 		return fmt.Errorf("created init migration for entity %s not found", entityName)
 	}
 
+	// Writing migration files
 	return writeInitMigrationFiles(schema, *state.latest)
 }
 
@@ -58,11 +61,14 @@ func makeAlterMigration(module migrationModule, entityName string) error {
 	if err != nil {
 		return err
 	}
+
+	// Checking for schema changes
 	if diff.empty() {
 		fmt.Printf("No schema changes detected for entity %s in module %s.\n", entityName, module.name)
 		return nil
 	}
 
+	// Creating new migration
 	migrationName := alterMigrationName(diff.changedColumnNames(), entityName)
 	fmt.Printf("Create new alter migration for entity %s in module %s.\n", entityName, module.name)
 	if err := runCommand("migrate", "create", "-ext", "sql", "-dir", module.migrationDir, "-seq", migrationName); err != nil {
@@ -77,6 +83,7 @@ func makeAlterMigration(module migrationModule, entityName string) error {
 		return fmt.Errorf("created alter migration for entity %s not found", entityName)
 	}
 
+	// Writing migration files
 	return writeAlterMigrationFiles(diff, *state.latest)
 }
 
@@ -114,18 +121,29 @@ func writeAlterMigrationFiles(diff schemaDiff, file migrationFile) error {
 
 func writeMigrationFiles(file migrationFile, upSQL string, downSQL string) error {
 	upPath, downPath := migrationFilePair(file)
+	// Dry run check
+	if DryRun {
+		fmt.Printf("[dry-run] write %s\n%s\n", upPath, upSQL)
+		fmt.Printf("[dry-run] write %s\n%s\n", downPath, downSQL)
+
+		return nil
+	}
+	// Writing migration files
 	if err := os.WriteFile(upPath, []byte(upSQL), 0644); err != nil {
 		return err
 	}
+
 	return os.WriteFile(downPath, []byte(downSQL), 0644)
 }
 
 func buildCreateTableSQL(schema tableSchema) string {
 	lines := make([]string, 0, len(schema.columns)+len(schema.foreignKeys))
+	// Building columns
 	for _, column := range schema.columns {
 		lines = append(lines, "    "+buildColumnDefinition(column))
 	}
 
+	// Building foreign keys
 	for _, foreignKey := range schema.foreignKeys {
 		lines = append(lines, "    "+buildCreateForeignKeyDefinition(foreignKey))
 	}
@@ -155,6 +173,7 @@ func buildAlterUpLines(diff schemaDiff) []string {
 	for _, change := range diff.changedForeignKeys {
 		lines = append(lines, dropForeignKeyLine(diff.tableName, change.before))
 	}
+	// Removing columns
 	for _, column := range diff.removedColumns {
 		lines = append(lines, dropColumnLine(column))
 	}
@@ -162,6 +181,7 @@ func buildAlterUpLines(diff schemaDiff) []string {
 	for _, change := range diff.changedColumns {
 		lines = append(lines, buildAlterColumnChangeLines(diff.tableName, change.before, change.after)...)
 	}
+	// Adding columns
 	for _, column := range diff.addedColumns {
 		lines = append(lines, addColumnLine(column))
 	}
@@ -180,22 +200,28 @@ func buildAlterDownLines(diff schemaDiff) []string {
 	lines := make([]string, 0, diff.operationCount())
 
 	// Down migrations reverse up operations in dependency-safe order.
+
+	// Dropping added constraints
 	for i := len(diff.changedForeignKeys) - 1; i >= 0; i-- {
 		lines = append(lines, dropForeignKeyLine(diff.tableName, diff.changedForeignKeys[i].after))
 	}
 	for i := len(diff.addedForeignKeys) - 1; i >= 0; i-- {
 		lines = append(lines, dropForeignKeyLine(diff.tableName, diff.addedForeignKeys[i]))
 	}
+	// Removing added columns
 	for i := len(diff.addedColumns) - 1; i >= 0; i-- {
 		lines = append(lines, dropColumnLine(diff.addedColumns[i]))
 	}
+	// Reverting column changes
 	for i := len(diff.changedColumns) - 1; i >= 0; i-- {
 		change := diff.changedColumns[i]
 		lines = append(lines, buildAlterColumnChangeLines(diff.tableName, change.after, change.before)...)
 	}
+	// Adding back removed columns
 	for i := len(diff.removedColumns) - 1; i >= 0; i-- {
 		lines = append(lines, addColumnLine(diff.removedColumns[i]))
 	}
+	// Adding back removed constraints
 	for i := len(diff.changedForeignKeys) - 1; i >= 0; i-- {
 		lines = append(lines, addForeignKeyLine(diff.tableName, diff.changedForeignKeys[i].before))
 	}
@@ -208,16 +234,24 @@ func buildAlterDownLines(diff schemaDiff) []string {
 
 func buildAlterColumnChangeLines(tableName string, before columnSchema, after columnSchema) []string {
 	var lines []string
+	// Removing unique
 	if before.unique && !after.unique {
 		lines = append(lines, dropUniqueLine(tableName, before))
 	}
+
+	// Changing type
 	if before.dataType != after.dataType {
 		lines = append(lines, buildAlterColumnTypeLine(after.name, after.dataType))
 	}
+
+	// Changing nullability
 	lines = append(lines, buildAlterColumnNullLine(before, after)...)
+
+	// Adding unique
 	if !before.unique && after.unique {
 		lines = append(lines, addUniqueLine(tableName, after))
 	}
+
 	return lines
 }
 
@@ -269,6 +303,7 @@ func buildCreateForeignKeyDefinition(foreignKey foreignKeySchema) string {
 	if foreignKey.onDelete != "" {
 		line += " ON DELETE " + foreignKey.onDelete
 	}
+
 	return line
 }
 
@@ -283,6 +318,7 @@ func buildForeignKeyDefinition(tableName string, foreignKey foreignKeySchema) st
 	if foreignKey.onDelete != "" {
 		line += " ON DELETE " + foreignKey.onDelete
 	}
+
 	return line
 }
 
@@ -311,6 +347,7 @@ func alterMigrationName(columns []string, entityName string) string {
 		parts = append(parts, column)
 	}
 	parts = append(parts, entityName)
+
 	return strings.Join(parts, "_")
 }
 

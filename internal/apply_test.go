@@ -7,12 +7,11 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func Test_Migration_MigrateUp(t *testing.T) {
 	t.Run("runs all modules", func(t *testing.T) {
-		// ===== Arrange =====
+		// ===== Arrange ===== //
 		root := makeTestProject(t)
 		t.Chdir(root)
 		writeTestDotEnv(t, root)
@@ -27,18 +26,18 @@ func Test_Migration_MigrateUp(t *testing.T) {
 		})
 		defer restoreRunCommand()
 
-		// ===== Act =====
+		// ===== Act ===== //
 		err := MigrateUp()
 
-		// ===== Assert =====
-		require.NoError(t, err)
-		require.Len(t, calls, 2)
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.Len(t, calls, 2)
 		assert.Contains(t, calls[0], "up")
 		assert.Contains(t, calls[1], "up")
 	})
 
 	t.Run("runs selected module", func(t *testing.T) {
-		// ===== Arrange =====
+		// ===== Arrange ===== //
 		root := makeTestProject(t)
 		t.Chdir(root)
 		writeTestDotEnv(t, root)
@@ -53,22 +52,22 @@ func Test_Migration_MigrateUp(t *testing.T) {
 		})
 		defer restoreRunCommand()
 
-		// ===== Act =====
+		// ===== Act ===== //
 		err := MigrateUp("iam")
 
-		// ===== Assert =====
-		require.NoError(t, err)
-		require.Len(t, calls, 1)
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.Len(t, calls, 1)
 		assert.Contains(t, calls[0], filepath.Join(root, "module", "iam", "migration"))
 		assert.Contains(t, calls[0], "up")
 	})
 
 	t.Run("skips module without migration files", func(t *testing.T) {
-		// ===== Arrange =====
+		// ===== Arrange ===== //
 		root := makeTestProject(t)
 		t.Chdir(root)
 		writeTestDotEnv(t, root)
-		require.NoError(t, os.MkdirAll(filepath.Join(root, "module", "iam", "migration"), 0755))
+		assert.NoError(t, os.MkdirAll(filepath.Join(root, "module", "iam", "migration"), 0755))
 
 		called := false
 		restoreRunCommand := stubRunCommand(t, func(cmd string, args ...string) error {
@@ -77,16 +76,16 @@ func Test_Migration_MigrateUp(t *testing.T) {
 		})
 		defer restoreRunCommand()
 
-		// ===== Act =====
+		// ===== Act ===== //
 		err := MigrateUp()
 
-		// ===== Assert =====
-		require.NoError(t, err)
+		// ===== Assert ===== //
+		assert.NoError(t, err)
 		assert.False(t, called)
 	})
 
 	t.Run("ignores no change error", func(t *testing.T) {
-		// ===== Arrange =====
+		// ===== Arrange ===== //
 		root := makeTestProject(t)
 		t.Chdir(root)
 		writeTestDotEnv(t, root)
@@ -97,17 +96,17 @@ func Test_Migration_MigrateUp(t *testing.T) {
 		})
 		defer restoreRunCommand()
 
-		// ===== Act =====
+		// ===== Act ===== //
 		err := MigrateUp()
 
-		// ===== Assert =====
-		require.NoError(t, err)
+		// ===== Assert ===== //
+		assert.NoError(t, err)
 	})
 }
 
 func Test_Migration_MigrateDown(t *testing.T) {
 	t.Run("runs selected module with steps", func(t *testing.T) {
-		// ===== Arrange =====
+		// ===== Arrange ===== //
 		root := makeTestProject(t)
 		t.Chdir(root)
 		writeTestDotEnv(t, root)
@@ -121,24 +120,24 @@ func Test_Migration_MigrateDown(t *testing.T) {
 		})
 		defer restoreRunCommand()
 
-		// ===== Act =====
+		// ===== Act ===== //
 		err := MigrateDown(1, "iam")
 
-		// ===== Assert =====
-		require.NoError(t, err)
-		require.Len(t, calls, 1)
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.Len(t, calls, 1)
 		assert.Contains(t, calls[0], "down")
 		assert.Contains(t, calls[0], "1")
 	})
 
 	t.Run("rejects invalid steps", func(t *testing.T) {
-		// ===== Arrange =====
+		// ===== Arrange ===== //
 
-		// ===== Act =====
+		// ===== Act ===== //
 		err := MigrateDown(0)
 
-		// ===== Assert =====
-		require.Error(t, err)
+		// ===== Assert ===== //
+		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "down steps must be greater than zero")
 	})
 }
@@ -147,8 +146,8 @@ func makeTestProject(t *testing.T) string {
 	t.Helper()
 
 	root := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(root, "go.mod"), []byte("module test\n"), 0644))
-	require.NoError(t, os.MkdirAll(filepath.Join(root, "module"), 0755))
+	assert.NoError(t, os.WriteFile(filepath.Join(root, "go.mod"), []byte("module test\n"), 0644))
+	assert.NoError(t, os.MkdirAll(filepath.Join(root, "module"), 0755))
 
 	return root
 }
@@ -157,7 +156,7 @@ func writeTestDotEnv(t *testing.T, root string) {
 	t.Helper()
 
 	unsetDatabaseEnv(t)
-	require.NoError(t, os.WriteFile(filepath.Join(root, ".env"), []byte(`
+	assert.NoError(t, os.WriteFile(filepath.Join(root, ".env"), []byte(`
 DB_HOST=localhost
 DB_PORT=5432
 DB_NAME=wibee
@@ -170,6 +169,6 @@ func writeTestMigrationFile(t *testing.T, root string, moduleName string, fileNa
 	t.Helper()
 
 	migrationDir := filepath.Join(root, "module", moduleName, "migration")
-	require.NoError(t, os.MkdirAll(migrationDir, 0755))
-	require.NoError(t, os.WriteFile(filepath.Join(migrationDir, fileName), []byte("-- test\n"), 0644))
+	assert.NoError(t, os.MkdirAll(migrationDir, 0755))
+	assert.NoError(t, os.WriteFile(filepath.Join(migrationDir, fileName), []byte("-- test\n"), 0644))
 }

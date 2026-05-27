@@ -1,6 +1,9 @@
 package internal
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
 
 type schemaDiff struct {
 	tableName          string
@@ -29,6 +32,7 @@ func diffSchema(previous tableSchema, desired tableSchema) (schemaDiff, error) {
 	previousColumns := columnsByName(previous.columns)
 	desiredColumns := columnsByName(desired.columns)
 
+	// Diff columns: added or changed
 	for _, column := range desired.columns {
 		before, ok := previousColumns[column.name]
 		if !ok {
@@ -47,6 +51,7 @@ func diffSchema(previous tableSchema, desired tableSchema) (schemaDiff, error) {
 		}
 	}
 
+	// Diff columns: removed
 	for _, column := range previous.columns {
 		if _, ok := desiredColumns[column.name]; ok {
 			continue
@@ -57,9 +62,13 @@ func diffSchema(previous tableSchema, desired tableSchema) (schemaDiff, error) {
 		diff.removedColumns = append(diff.removedColumns, column)
 	}
 
+	// Warn on potential renames
+	warnColumnRename(diff.removedColumns, diff.addedColumns)
+
 	previousForeignKeys := foreignKeysByColumn(previous.foreignKeys)
 	desiredForeignKeys := foreignKeysByColumn(desired.foreignKeys)
 
+	// Diff foreign keys: added or changed
 	for _, foreignKey := range desired.foreignKeys {
 		before, ok := previousForeignKeys[foreignKey.column]
 		if !ok {
@@ -71,6 +80,7 @@ func diffSchema(previous tableSchema, desired tableSchema) (schemaDiff, error) {
 		}
 	}
 
+	// Diff foreign keys: removed
 	for _, foreignKey := range previous.foreignKeys {
 		if _, ok := desiredForeignKeys[foreignKey.column]; !ok {
 			diff.removedForeignKeys = append(diff.removedForeignKeys, foreignKey)
@@ -137,6 +147,7 @@ func columnsByName(columns []columnSchema) map[string]columnSchema {
 	for _, column := range columns {
 		byName[column.name] = column
 	}
+
 	return byName
 }
 
@@ -145,6 +156,7 @@ func foreignKeysByColumn(foreignKeys []foreignKeySchema) map[string]foreignKeySc
 	for _, foreignKey := range foreignKeys {
 		byColumn[foreignKey.column] = foreignKey
 	}
+
 	return byColumn
 }
 
@@ -161,4 +173,14 @@ func sameForeignKey(left foreignKeySchema, right foreignKeySchema) bool {
 		left.refTable == right.refTable &&
 		left.refColumn == right.refColumn &&
 		left.onDelete == right.onDelete
+}
+
+func warnColumnRename(removed []columnSchema, added []columnSchema) {
+	for _, r := range removed {
+		for _, a := range added {
+			if r.dataType == a.dataType {
+				fmt.Fprintf(os.Stderr, "warning: column %q removed and %q added with same type %q — if this is a rename, data will be lost\n", r.name, a.name, r.dataType)
+			}
+		}
+	}
 }

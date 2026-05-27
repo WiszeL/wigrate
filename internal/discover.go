@@ -2,6 +2,7 @@ package internal
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,20 +35,27 @@ type migrationState struct {
 func findModules() ([]migrationModule, error) {
 	var modules []migrationModule
 
+	// Finding project root
 	root, err := FindRoot()
 	if err != nil {
 		return nil, err
 	}
 
-	// Find modules from the project root.
-	modulesPath := filepath.Join(root, "module")
-	if _, err := os.Stat(modulesPath); os.IsNotExist(err) {
+	// Resolving module path
+	var modulesPath string
+	if filepath.IsAbs(ModulesDir) {
+		modulesPath = ModulesDir
+	} else {
+		modulesPath = filepath.Join(root, ModulesDir)
+	}
+	if _, err := os.Stat(modulesPath); errors.Is(err, os.ErrNotExist) {
 		return nil, errors.New("module path is not found")
 	}
 
+	// Reading module directories
 	entries, err := os.ReadDir(modulesPath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read modules: %w", err)
 	}
 	for _, entry := range entries {
 		// Only module directories can own migration/entity paths.
@@ -72,11 +80,13 @@ func entityNameFromFile(goName string) string {
 }
 
 func findEntityMigrationState(module migrationModule, entityName string) (migrationState, error) {
+	// Reading migration directory
 	entries, err := os.ReadDir(module.migrationDir)
 	if err != nil {
-		return migrationState{}, err
+		return migrationState{}, fmt.Errorf("read migration dir: %w", err)
 	}
 
+	// Finding latest migration state
 	state := migrationState{}
 	for _, entry := range entries {
 		if entry.IsDir() {
@@ -151,5 +161,6 @@ func parseMigrationFile(path string, entityName string) (*migrationFile, bool) {
 
 func migrationFilePair(file migrationFile) (string, string) {
 	dir := filepath.Dir(file.path)
+
 	return filepath.Join(dir, file.baseName+".up.sql"), filepath.Join(dir, file.baseName+".down.sql")
 }

@@ -1,17 +1,17 @@
 package internal
 
 import (
+	"go/ast"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func Test_Migration_ParseEntitySchema(t *testing.T) {
 	t.Run("maps struct fields and inline comments to table schema", func(t *testing.T) {
-		// ===== Arrange =====
+		// ===== Arrange ===== //
 		module := makeTestMigrationModule(t, "shop", "user_profile.go", `package entity
 
 import (
@@ -31,12 +31,11 @@ type UserProfile struct {
 }
 `)
 
-		// ===== Act =====
+		// ===== Act ===== //
 		schema, err := parseEntitySchema(module, "user_profile")
 
-		// ===== Assert =====
-		require.NoError(t, err)
-
+		// ===== Assert ===== //
+		assert.NoError(t, err)
 		assert.Equal(t, "user_profiles", schema.name)
 		assert.Equal(t, []columnSchema{
 			{name: "id", dataType: "UUID", primary: true},
@@ -53,7 +52,7 @@ type UserProfile struct {
 	})
 
 	t.Run("requires nullable column for set null delete rule", func(t *testing.T) {
-		// ===== Arrange =====
+		// ===== Arrange ===== //
 		module := makeTestMigrationModule(t, "shop", "post.go", `package entity
 
 import "github.com/google/uuid"
@@ -64,18 +63,82 @@ type Post struct {
 }
 `)
 
-		// ===== Act =====
+		// ===== Act ===== //
 		_, err := parseEntitySchema(module, "post")
 
-		// ===== Assert =====
-		require.Error(t, err)
+		// ===== Assert ===== //
+		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "del:setnull requires null")
+	})
+
+	t.Run("honors pk annotation for non-ID field", func(t *testing.T) {
+		// ===== Arrange ===== //
+		module := makeTestMigrationModule(t, "shop", "custom.go", `package entity
+
+import "github.com/google/uuid"
+
+type Custom struct {
+	ID   uuid.UUID
+	Code string // 20 unique pk
+}
+`)
+
+		// ===== Act ===== //
+		schema, err := parseEntitySchema(module, "custom")
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.Len(t, schema.columns, 2)
+		assert.True(t, schema.columns[1].primary)
+		assert.Equal(t, "code", schema.columns[1].name)
+	})
+
+	t.Run("makes pointer field nullable by default", func(t *testing.T) {
+		// ===== Arrange ===== //
+		module := makeTestMigrationModule(t, "shop", "item.go", `package entity
+
+import "github.com/google/uuid"
+
+type Item struct {
+	ID    uuid.UUID
+	Name  *string
+	Price *int
+}
+`)
+
+		// ===== Act ===== //
+		schema, err := parseEntitySchema(module, "item")
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.Len(t, schema.columns, 3)
+		assert.False(t, schema.columns[1].notNull, "pointer string should be nullable")
+		assert.False(t, schema.columns[2].notNull, "pointer int should be nullable")
+	})
+
+	t.Run("explicit null on pointer field is still nullable", func(t *testing.T) {
+		// ===== Arrange ===== //
+		module := makeTestMigrationModule(t, "shop", "product.go", `package entity
+
+import "github.com/google/uuid"
+
+type Product struct {
+	ID   uuid.UUID
+	Desc *string // 50 null
+}
+`)
+
+		// ===== Act ===== //
+		schema, err := parseEntitySchema(module, "product")
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.Len(t, schema.columns, 2)
+		assert.False(t, schema.columns[1].notNull)
+		assert.Equal(t, "VARCHAR(50)", schema.columns[1].dataType)
 	})
 }
 
 func Test_Migration_BuildCreateTableSQL(t *testing.T) {
 	t.Run("builds create table sql", func(t *testing.T) {
-		// ===== Arrange =====
+		// ===== Arrange ===== //
 		schema := tableSchema{
 			name: "posts",
 			columns: []columnSchema{
@@ -88,10 +151,10 @@ func Test_Migration_BuildCreateTableSQL(t *testing.T) {
 			},
 		}
 
-		// ===== Act =====
+		// ===== Act ===== //
 		sql := buildCreateTableSQL(schema)
 
-		// ===== Assert =====
+		// ===== Assert ===== //
 		assert.Equal(t, `CREATE TABLE posts (
     id UUID PRIMARY KEY,
     user_id UUID NOT NULL,
@@ -104,14 +167,491 @@ func Test_Migration_BuildCreateTableSQL(t *testing.T) {
 
 func Test_Migration_BuildDropTableSQL(t *testing.T) {
 	t.Run("builds drop table sql", func(t *testing.T) {
-		// ===== Arrange =====
+		// ===== Arrange ===== //
 		schema := tableSchema{name: "posts"}
 
-		// ===== Act =====
+		// ===== Act ===== //
 		sql := buildDropTableSQL(schema)
 
-		// ===== Assert =====
+		// ===== Assert ===== //
 		assert.Equal(t, "DROP TABLE IF EXISTS posts;\n", sql)
+	})
+}
+
+func Test_Schema_SnakeCase(t *testing.T) {
+	t.Run("converts camel case", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		result := snakeCase("UserID")
+		// ===== Assert ===== //
+		assert.Equal(t, "user_id", result)
+	})
+
+	t.Run("converts ID to id", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		result := snakeCase("ID")
+		// ===== Assert ===== //
+		assert.Equal(t, "id", result)
+	})
+
+	t.Run("handles HTML in acronym", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		result := snakeCase("HTMLParser")
+		// ===== Assert ===== //
+		assert.Equal(t, "html_parser", result)
+	})
+
+	t.Run("preserves existing underscores", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		result := snakeCase("already_snake")
+		// ===== Assert ===== //
+		assert.Equal(t, "already_snake", result)
+	})
+
+	t.Run("handles single character", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		result := snakeCase("A")
+
+		// ===== Assert ===== //
+		assert.Equal(t, "a", result)
+	})
+
+	t.Run("handles empty string", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		result := snakeCase("")
+
+		// ===== Assert ===== //
+		assert.Equal(t, "", result)
+	})
+}
+
+func Test_Schema_PascalCase(t *testing.T) {
+	t.Run("converts snake case", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		result := pascalCase("user")
+
+		// ===== Assert ===== //
+		assert.Equal(t, "User", result)
+	})
+
+	t.Run("converts multi-word snake case", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		result := pascalCase("user_profile")
+		// ===== Assert ===== //
+		assert.Equal(t, "UserProfile", result)
+	})
+
+	t.Run("handles empty string", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		result := pascalCase("")
+
+		// ===== Assert ===== //
+		assert.Equal(t, "", result)
+	})
+
+	t.Run("handles single word", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		result := pascalCase("user")
+
+		// ===== Assert ===== //
+		assert.Equal(t, "User", result)
+	})
+}
+
+func Test_Schema_PluralizeSnakeCase(t *testing.T) {
+	t.Run("appends s for regular words", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		result := pluralizeSnakeCase("user")
+
+		// ===== Assert ===== //
+		assert.Equal(t, "users", result)
+	})
+
+	t.Run("changes y to ies after consonant", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		result := pluralizeSnakeCase("category")
+
+		// ===== Assert ===== //
+		assert.Equal(t, "categories", result)
+	})
+
+	t.Run("keeps y after vowel", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		result := pluralizeSnakeCase("toy")
+
+		// ===== Assert ===== //
+		assert.Equal(t, "toys", result)
+	})
+
+	t.Run("appends es for s ending", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		result := pluralizeSnakeCase("status")
+
+		// ===== Assert ===== //
+		assert.Equal(t, "statuses", result)
+	})
+
+	t.Run("appends es for x ending", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		result := pluralizeSnakeCase("box")
+
+		// ===== Assert ===== //
+		assert.Equal(t, "boxes", result)
+	})
+
+	t.Run("appends es for z ending", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		result := pluralizeSnakeCase("quiz")
+
+		// ===== Assert ===== //
+		assert.Equal(t, "quizes", result)
+	})
+
+	t.Run("appends es for ch ending", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		result := pluralizeSnakeCase("match")
+
+		// ===== Assert ===== //
+		assert.Equal(t, "matches", result)
+	})
+
+	t.Run("appends es for sh ending", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		result := pluralizeSnakeCase("dish")
+
+		// ===== Assert ===== //
+		assert.Equal(t, "dishes", result)
+	})
+
+	t.Run("handles empty string", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		result := pluralizeSnakeCase("")
+		// ===== Assert ===== //
+		assert.Equal(t, "", result)
+	})
+}
+
+func Test_Schema_IdentToSQLType(t *testing.T) {
+	t.Run("maps string to TEXT", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		typ, err := identToSQLType("string", fieldComment{})
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.Equal(t, "TEXT", typ)
+	})
+
+	t.Run("maps string with length to VARCHAR", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		typ, err := identToSQLType("string", fieldComment{length: 50})
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.Equal(t, "VARCHAR(50)", typ)
+	})
+
+	t.Run("maps int to INTEGER", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		typ, err := identToSQLType("int", fieldComment{})
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.Equal(t, "INTEGER", typ)
+	})
+
+	t.Run("maps int32 to INTEGER", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		typ, err := identToSQLType("int32", fieldComment{})
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.Equal(t, "INTEGER", typ)
+	})
+
+	t.Run("maps int64 to BIGINT", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		typ, err := identToSQLType("int64", fieldComment{})
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.Equal(t, "BIGINT", typ)
+	})
+
+	t.Run("maps bool to BOOLEAN", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		typ, err := identToSQLType("bool", fieldComment{})
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.Equal(t, "BOOLEAN", typ)
+	})
+
+	t.Run("maps float32 to REAL", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		typ, err := identToSQLType("float32", fieldComment{})
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.Equal(t, "REAL", typ)
+	})
+
+	t.Run("maps float64 to DOUBLE PRECISION", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		typ, err := identToSQLType("float64", fieldComment{})
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.Equal(t, "DOUBLE PRECISION", typ)
+	})
+
+	t.Run("maps time.Time to TIMESTAMPTZ", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		typ, err := identToSQLType("time.Time", fieldComment{})
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.Equal(t, "TIMESTAMPTZ", typ)
+	})
+
+	t.Run("maps uuid.UUID to UUID", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		typ, err := identToSQLType("uuid.UUID", fieldComment{})
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.Equal(t, "UUID", typ)
+	})
+
+	t.Run("returns error for unsupported type", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		_, err := identToSQLType("unsupported.Type", fieldComment{})
+		// ===== Assert ===== //
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "unsupported field type")
+	})
+}
+
+func Test_Schema_ParseFieldComment(t *testing.T) {
+	t.Run("returns empty comment for no comment", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		comment, err := parseFieldComment(&ast.Field{})
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.Equal(t, fieldComment{}, comment)
+	})
+
+	t.Run("parses null token", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		comment, err := parseFieldComment(&ast.Field{
+			Comment: &ast.CommentGroup{
+				List: []*ast.Comment{{Text: "// null"}},
+			},
+		})
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.True(t, comment.nullable)
+	})
+
+	t.Run("parses unique token", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		comment, err := parseFieldComment(&ast.Field{
+			Comment: &ast.CommentGroup{
+				List: []*ast.Comment{{Text: "// unique"}},
+			},
+		})
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.True(t, comment.unique)
+	})
+
+	t.Run("parses length token", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		comment, err := parseFieldComment(&ast.Field{
+			Comment: &ast.CommentGroup{
+				List: []*ast.Comment{{Text: "// 50"}},
+			},
+		})
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.Equal(t, 50, comment.length)
+	})
+
+	t.Run("parses ref table", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		comment, err := parseFieldComment(&ast.Field{
+			Comment: &ast.CommentGroup{
+				List: []*ast.Comment{{Text: "// ref:roles"}},
+			},
+		})
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.Equal(t, "roles", comment.refTable)
+	})
+
+	t.Run("parses delete rule", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		comment, err := parseFieldComment(&ast.Field{
+			Comment: &ast.CommentGroup{
+				List: []*ast.Comment{{Text: "// del:cascade"}},
+			},
+		})
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.Equal(t, "CASCADE", comment.deleteRule)
+	})
+
+	t.Run("parses multiple tokens", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		comment, err := parseFieldComment(&ast.Field{
+			Comment: &ast.CommentGroup{
+				List: []*ast.Comment{{Text: "// 20 null unique ref:roles del:cascade"}},
+			},
+		})
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.Equal(t, 20, comment.length)
+		assert.True(t, comment.nullable)
+		assert.True(t, comment.unique)
+		assert.Equal(t, "roles", comment.refTable)
+		assert.Equal(t, "CASCADE", comment.deleteRule)
+	})
+
+	t.Run("returns error for empty ref table", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		_, err := parseFieldComment(&ast.Field{
+			Comment: &ast.CommentGroup{
+				List: []*ast.Comment{{Text: "// ref:"}},
+			},
+		})
+		// ===== Assert ===== //
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "empty ref table")
+	})
+
+	t.Run("returns error for invalid delete rule", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		_, err := parseFieldComment(&ast.Field{
+			Comment: &ast.CommentGroup{
+				List: []*ast.Comment{{Text: "// del:invalid"}},
+			},
+		})
+		// ===== Assert ===== //
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "unsupported delete rule")
+	})
+
+	t.Run("returns error for invalid token", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		_, err := parseFieldComment(&ast.Field{
+			Comment: &ast.CommentGroup{
+				List: []*ast.Comment{{Text: "// unknown_token"}},
+			},
+		})
+		// ===== Assert ===== //
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "unknown comment token")
+	})
+
+	t.Run("returns error for zero length", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		_, err := parseFieldComment(&ast.Field{
+			Comment: &ast.CommentGroup{
+				List: []*ast.Comment{{Text: "// 0"}},
+			},
+		})
+		// ===== Assert ===== //
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "varchar length must be greater than zero")
+	})
+
+	t.Run("returns error for negative length", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		_, err := parseFieldComment(&ast.Field{
+			Comment: &ast.CommentGroup{
+				List: []*ast.Comment{{Text: "// -5"}},
+			},
+		})
+		// ===== Assert ===== //
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "varchar length must be greater than zero")
+	})
+}
+
+func Test_Schema_NormalizeDeleteRule(t *testing.T) {
+	t.Run("normalizes cascade", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		result, err := normalizeDeleteRule("cascade")
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.Equal(t, "CASCADE", result)
+	})
+
+	t.Run("normalizes setnull", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		result, err := normalizeDeleteRule("setnull")
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.Equal(t, "SET NULL", result)
+	})
+
+	t.Run("normalizes restrict", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		result, err := normalizeDeleteRule("restrict")
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.Equal(t, "RESTRICT", result)
+	})
+
+	t.Run("normalizes noaction", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		result, err := normalizeDeleteRule("noaction")
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.Equal(t, "NO ACTION", result)
+	})
+
+	t.Run("returns error for unsupported rule", func(t *testing.T) {
+		// ===== Arrange ===== //
+		// ===== Act ===== //
+		_, err := normalizeDeleteRule("invalid")
+		// ===== Assert ===== //
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "unsupported delete rule")
 	})
 }
 
@@ -121,9 +661,9 @@ func makeTestMigrationModule(t *testing.T, moduleName string, entityFile string,
 	root := t.TempDir()
 	entityDir := filepath.Join(root, "module", moduleName, "internal", "domain", "entity")
 	migrationDir := filepath.Join(root, "module", moduleName, "migration")
-	require.NoError(t, os.MkdirAll(entityDir, 0755))
-	require.NoError(t, os.MkdirAll(migrationDir, 0755))
-	require.NoError(t, os.WriteFile(filepath.Join(entityDir, entityFile), []byte(entitySource), 0644))
+	assert.NoError(t, os.MkdirAll(entityDir, 0755))
+	assert.NoError(t, os.MkdirAll(migrationDir, 0755))
+	assert.NoError(t, os.WriteFile(filepath.Join(entityDir, entityFile), []byte(entitySource), 0644))
 
 	return migrationModule{
 		name:         moduleName,

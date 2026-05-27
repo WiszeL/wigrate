@@ -36,6 +36,7 @@ type fieldComment struct {
 	length     int
 	nullable   bool
 	unique     bool
+	primary    bool
 	refTable   string
 	deleteRule string
 }
@@ -43,12 +44,15 @@ type fieldComment struct {
 func parseEntitySchema(module migrationModule, entityName string) (tableSchema, error) {
 	// Entity files are the source of truth for desired schema.
 	entityPath := filepath.Join(module.entityDir, entityName+".go")
+
+	// Parsing the entity file
 	fileSet := token.NewFileSet()
 	file, err := parser.ParseFile(fileSet, entityPath, nil, parser.ParseComments)
 	if err != nil {
 		return tableSchema{}, err
 	}
 
+	// Finding the target struct
 	structName := pascalCase(entityName)
 	structType := findStruct(file, structName)
 	if structType == nil {
@@ -56,6 +60,8 @@ func parseEntitySchema(module migrationModule, entityName string) (tableSchema, 
 	}
 
 	schema := tableSchema{name: tableNameFromEntity(entityName)}
+
+	// Mapping fields to table schema
 	for _, field := range structType.Fields.List {
 		columns, foreignKeys, err := mapStructFieldToSchema(structName, field)
 		if err != nil {
@@ -77,11 +83,13 @@ func mapStructFieldToSchema(structName string, field *ast.Field) ([]columnSchema
 		return nil, nil, nil
 	}
 
+	// Parsing the field comment
 	comment, err := parseFieldComment(field)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%s: %w", structName, err)
 	}
 
+	// Mapping exported fields to columns and FKs
 	var columns []columnSchema
 	var foreignKeys []foreignKeySchema
 	for _, name := range field.Names {
@@ -136,6 +144,8 @@ func parseFieldComment(field *ast.Field) (fieldComment, error) {
 	}
 
 	comment := fieldComment{}
+
+	// Iterating over comment tokens
 	for token := range strings.FieldsSeq(field.Comment.Text()) {
 		// Inline comments form a small schema DSL, e.g. `20 null unique`.
 		switch {
@@ -143,6 +153,8 @@ func parseFieldComment(field *ast.Field) (fieldComment, error) {
 			comment.nullable = true
 		case token == "unique":
 			comment.unique = true
+		case token == "pk":
+			comment.primary = true
 		case strings.HasPrefix(token, "ref:"):
 			comment.refTable = strings.TrimPrefix(token, "ref:")
 			if comment.refTable == "" {
@@ -185,16 +197,20 @@ func normalizeDeleteRule(token string) (string, error) {
 }
 
 func mapFieldToColumn(fieldName string, expr ast.Expr, comment fieldComment) (columnSchema, error) {
+	// Mapping Go type to SQL type
 	dataType, err := goTypeToSQLType(expr, comment)
 	if err != nil {
 		return columnSchema{}, err
 	}
 
+	_, isPointer := expr.(*ast.StarExpr)
+
+	// Setting column constraints
 	column := columnSchema{
 		name:     snakeCase(fieldName),
 		dataType: dataType,
-		notNull:  !comment.nullable,
-		primary:  fieldName == "ID",
+		notNull:  !comment.nullable && !isPointer,
+		primary:  fieldName == "ID" || comment.primary,
 		unique:   comment.unique,
 	}
 	if column.primary {
@@ -206,15 +222,17 @@ func mapFieldToColumn(fieldName string, expr ast.Expr, comment fieldComment) (co
 }
 
 func mapFieldToForeignKey(fieldName string, column columnSchema, comment fieldComment) (foreignKeySchema, bool, error) {
-	// Any non-primary field ending with ID is treated as an FK by convention.
+	// Checking FK naming convention
 	if fieldName == "ID" || !strings.HasSuffix(fieldName, "ID") {
 		return foreignKeySchema{}, false, nil
 	}
 
+	// Validating delete rule against nullability
 	if comment.deleteRule == "SET NULL" && column.notNull {
 		return foreignKeySchema{}, false, fmt.Errorf("del:setnull requires null")
 	}
 
+	// Resolving the referenced table
 	refEntity := strings.TrimSuffix(fieldName, "ID")
 	refTable := tableNameFromEntity(snakeCase(refEntity))
 	if comment.refTable != "" {
@@ -289,6 +307,7 @@ func pascalCase(value string) string {
 			builder.WriteRune(r)
 		}
 	}
+
 	return builder.String()
 }
 

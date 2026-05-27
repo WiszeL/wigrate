@@ -7,12 +7,11 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func Test_Migration_MakeInitMigration(t *testing.T) {
 	t.Run("creates init migration files from entity schema", func(t *testing.T) {
-		// ===== Arrange =====
+		// ===== Arrange ===== //
 		module := makeTestMigrationModule(t, "iam", "user.go", `package entity
 
 import "github.com/google/uuid"
@@ -29,22 +28,22 @@ type User struct {
 
 			upPath := filepath.Join(module.migrationDir, "000001_init_user.up.sql")
 			downPath := filepath.Join(module.migrationDir, "000001_init_user.down.sql")
-			require.NoError(t, os.WriteFile(upPath, []byte(""), 0644))
-			require.NoError(t, os.WriteFile(downPath, []byte(""), 0644))
+			assert.NoError(t, os.WriteFile(upPath, []byte(""), 0644))
+			assert.NoError(t, os.WriteFile(downPath, []byte(""), 0644))
 			return nil
 		})
 		defer restoreRunCommand()
 
-		// ===== Act =====
+		// ===== Act ===== //
 		err := makeInitMigration(module, "user")
 
-		// ===== Assert =====
-		require.NoError(t, err)
+		// ===== Assert ===== //
+		assert.NoError(t, err)
 
 		upSQL, err := os.ReadFile(filepath.Join(module.migrationDir, "000001_init_user.up.sql"))
-		require.NoError(t, err)
+		assert.NoError(t, err)
 		downSQL, err := os.ReadFile(filepath.Join(module.migrationDir, "000001_init_user.down.sql"))
-		require.NoError(t, err)
+		assert.NoError(t, err)
 
 		assert.Equal(t, `CREATE TABLE users (
     id UUID PRIMARY KEY,
@@ -57,7 +56,7 @@ type User struct {
 
 func Test_Migration_MakeAlterMigration(t *testing.T) {
 	t.Run("creates alter migration for added columns and foreign keys", func(t *testing.T) {
-		// ===== Arrange =====
+		// ===== Arrange ===== //
 		module := makeTestMigrationModule(t, "iam", "user.go", `package entity
 
 import "github.com/google/uuid"
@@ -69,12 +68,12 @@ type User struct {
 	RoleID uuid.UUID // ref:roles del:cascade
 }
 `)
-		require.NoError(t, os.WriteFile(filepath.Join(module.migrationDir, "000001_init_user.up.sql"), []byte(`CREATE TABLE users (
+		assert.NoError(t, os.WriteFile(filepath.Join(module.migrationDir, "000001_init_user.up.sql"), []byte(`CREATE TABLE users (
     id UUID PRIMARY KEY,
     email VARCHAR(20) NOT NULL
 );
 `), 0644))
-		require.NoError(t, os.WriteFile(filepath.Join(module.migrationDir, "000001_init_user.down.sql"), []byte("DROP TABLE IF EXISTS users;\n"), 0644))
+		assert.NoError(t, os.WriteFile(filepath.Join(module.migrationDir, "000001_init_user.down.sql"), []byte("DROP TABLE IF EXISTS users;\n"), 0644))
 
 		restoreRunCommand := stubRunCommand(t, func(cmd string, args ...string) error {
 			assert.Equal(t, "migrate", cmd)
@@ -82,22 +81,22 @@ type User struct {
 
 			upPath := filepath.Join(module.migrationDir, "000002_alter_name_role_id_user.up.sql")
 			downPath := filepath.Join(module.migrationDir, "000002_alter_name_role_id_user.down.sql")
-			require.NoError(t, os.WriteFile(upPath, []byte(""), 0644))
-			require.NoError(t, os.WriteFile(downPath, []byte(""), 0644))
+			assert.NoError(t, os.WriteFile(upPath, []byte(""), 0644))
+			assert.NoError(t, os.WriteFile(downPath, []byte(""), 0644))
 			return nil
 		})
 		defer restoreRunCommand()
 
-		// ===== Act =====
+		// ===== Act ===== //
 		err := makeAlterMigration(module, "user")
 
-		// ===== Assert =====
-		require.NoError(t, err)
+		// ===== Assert ===== //
+		assert.NoError(t, err)
 
 		upSQL, err := os.ReadFile(filepath.Join(module.migrationDir, "000002_alter_name_role_id_user.up.sql"))
-		require.NoError(t, err)
+		assert.NoError(t, err)
 		downSQL, err := os.ReadFile(filepath.Join(module.migrationDir, "000002_alter_name_role_id_user.down.sql"))
-		require.NoError(t, err)
+		assert.NoError(t, err)
 
 		assert.Equal(t, `ALTER TABLE users
     ADD COLUMN name VARCHAR(50) NOT NULL,
@@ -114,7 +113,7 @@ type User struct {
 
 func Test_Migration_MakeAlterMigrationFullDiff(t *testing.T) {
 	t.Run("creates alter migration for mixed schema changes", func(t *testing.T) {
-		// ===== Arrange =====
+		// ===== Arrange ===== //
 		module := makeTestMigrationModule(t, "iam", "user.go", `package entity
 
 import "github.com/google/uuid"
@@ -128,7 +127,7 @@ type User struct {
 	NewCode  string // 10
 }
 `)
-		require.NoError(t, os.WriteFile(filepath.Join(module.migrationDir, "000001_init_user.up.sql"), []byte(`CREATE TABLE users (
+		assert.NoError(t, os.WriteFile(filepath.Join(module.migrationDir, "000001_init_user.up.sql"), []byte(`CREATE TABLE users (
     id UUID PRIMARY KEY,
     email TEXT NOT NULL,
     age INTEGER NOT NULL,
@@ -138,7 +137,7 @@ type User struct {
     FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE
 );
 `), 0644))
-		require.NoError(t, os.WriteFile(filepath.Join(module.migrationDir, "000001_init_user.down.sql"), []byte("DROP TABLE IF EXISTS users;\n"), 0644))
+		assert.NoError(t, os.WriteFile(filepath.Join(module.migrationDir, "000001_init_user.down.sql"), []byte("DROP TABLE IF EXISTS users;\n"), 0644))
 
 		restoreRunCommand := stubRunCommand(t, func(cmd string, args ...string) error {
 			assert.Equal(t, "migrate", cmd)
@@ -146,22 +145,22 @@ type User struct {
 
 			upPath := filepath.Join(module.migrationDir, "000002_alter_new_code_obsolete_etc_user.up.sql")
 			downPath := filepath.Join(module.migrationDir, "000002_alter_new_code_obsolete_etc_user.down.sql")
-			require.NoError(t, os.WriteFile(upPath, []byte(""), 0644))
-			require.NoError(t, os.WriteFile(downPath, []byte(""), 0644))
+			assert.NoError(t, os.WriteFile(upPath, []byte(""), 0644))
+			assert.NoError(t, os.WriteFile(downPath, []byte(""), 0644))
 			return nil
 		})
 		defer restoreRunCommand()
 
-		// ===== Act =====
+		// ===== Act ===== //
 		err := makeAlterMigration(module, "user")
 
-		// ===== Assert =====
-		require.NoError(t, err)
+		// ===== Assert ===== //
+		assert.NoError(t, err)
 
 		upSQL, err := os.ReadFile(filepath.Join(module.migrationDir, "000002_alter_new_code_obsolete_etc_user.up.sql"))
-		require.NoError(t, err)
+		assert.NoError(t, err)
 		downSQL, err := os.ReadFile(filepath.Join(module.migrationDir, "000002_alter_new_code_obsolete_etc_user.down.sql"))
-		require.NoError(t, err)
+		assert.NoError(t, err)
 
 		assert.Equal(t, `ALTER TABLE users
     DROP CONSTRAINT IF EXISTS fk_users_role_id,
@@ -186,7 +185,7 @@ type User struct {
 
 func Test_Migration_MakeAlterMigrationNoChanges(t *testing.T) {
 	t.Run("does not create migration when schema is unchanged", func(t *testing.T) {
-		// ===== Arrange =====
+		// ===== Arrange ===== //
 		module := makeTestMigrationModule(t, "iam", "user.go", `package entity
 
 import "github.com/google/uuid"
@@ -196,12 +195,12 @@ type User struct {
 	Email string // 20 unique
 }
 `)
-		require.NoError(t, os.WriteFile(filepath.Join(module.migrationDir, "000001_init_user.up.sql"), []byte(`CREATE TABLE users (
+		assert.NoError(t, os.WriteFile(filepath.Join(module.migrationDir, "000001_init_user.up.sql"), []byte(`CREATE TABLE users (
     id UUID PRIMARY KEY,
     email VARCHAR(20) NOT NULL UNIQUE
 );
 `), 0644))
-		require.NoError(t, os.WriteFile(filepath.Join(module.migrationDir, "000001_init_user.down.sql"), []byte("DROP TABLE IF EXISTS users;\n"), 0644))
+		assert.NoError(t, os.WriteFile(filepath.Join(module.migrationDir, "000001_init_user.down.sql"), []byte("DROP TABLE IF EXISTS users;\n"), 0644))
 
 		called := false
 		restoreRunCommand := stubRunCommand(t, func(cmd string, args ...string) error {
@@ -210,18 +209,18 @@ type User struct {
 		})
 		defer restoreRunCommand()
 
-		// ===== Act =====
+		// ===== Act ===== //
 		err := makeAlterMigration(module, "user")
 
-		// ===== Assert =====
-		require.NoError(t, err)
+		// ===== Assert ===== //
+		assert.NoError(t, err)
 		assert.False(t, called)
 	})
 }
 
 func Test_Migration_OverwriteLatestMigration(t *testing.T) {
 	t.Run("overwrites init migration pair", func(t *testing.T) {
-		// ===== Arrange =====
+		// ===== Arrange ===== //
 		module := makeTestMigrationModule(t, "iam", "user.go", `package entity
 
 import "github.com/google/uuid"
@@ -233,8 +232,8 @@ type User struct {
 `)
 		upPath := filepath.Join(module.migrationDir, "000001_init_user.up.sql")
 		downPath := filepath.Join(module.migrationDir, "000001_init_user.down.sql")
-		require.NoError(t, os.WriteFile(upPath, []byte("-- old up\n"), 0644))
-		require.NoError(t, os.WriteFile(downPath, []byte("-- old down\n"), 0644))
+		assert.NoError(t, os.WriteFile(upPath, []byte("-- old up\n"), 0644))
+		assert.NoError(t, os.WriteFile(downPath, []byte("-- old down\n"), 0644))
 
 		latest := migrationFile{
 			path:      upPath,
@@ -243,16 +242,16 @@ type User struct {
 			direction: "up",
 		}
 
-		// ===== Act =====
+		// ===== Act ===== //
 		err := overwriteLatestMigration(module, "user", latest)
 
-		// ===== Assert =====
-		require.NoError(t, err)
+		// ===== Assert ===== //
+		assert.NoError(t, err)
 
 		upSQL, err := os.ReadFile(upPath)
-		require.NoError(t, err)
+		assert.NoError(t, err)
 		downSQL, err := os.ReadFile(downPath)
-		require.NoError(t, err)
+		assert.NoError(t, err)
 
 		assert.Equal(t, `CREATE TABLE users (
     id UUID PRIMARY KEY,
@@ -263,7 +262,7 @@ type User struct {
 	})
 
 	t.Run("overwrites alter migration pair", func(t *testing.T) {
-		// ===== Arrange =====
+		// ===== Arrange ===== //
 		module := makeTestMigrationModule(t, "iam", "user.go", `package entity
 
 import "github.com/google/uuid"
@@ -275,16 +274,16 @@ type User struct {
 	RoleID uuid.UUID // ref:roles del:cascade
 }
 `)
-		require.NoError(t, os.WriteFile(filepath.Join(module.migrationDir, "000001_init_user.up.sql"), []byte(`CREATE TABLE users (
+		assert.NoError(t, os.WriteFile(filepath.Join(module.migrationDir, "000001_init_user.up.sql"), []byte(`CREATE TABLE users (
     id UUID PRIMARY KEY,
     email VARCHAR(20) NOT NULL
 );
 `), 0644))
-		require.NoError(t, os.WriteFile(filepath.Join(module.migrationDir, "000001_init_user.down.sql"), []byte("DROP TABLE IF EXISTS users;\n"), 0644))
+		assert.NoError(t, os.WriteFile(filepath.Join(module.migrationDir, "000001_init_user.down.sql"), []byte("DROP TABLE IF EXISTS users;\n"), 0644))
 		upPath := filepath.Join(module.migrationDir, "000002_alter_name_user.up.sql")
 		downPath := filepath.Join(module.migrationDir, "000002_alter_name_user.down.sql")
-		require.NoError(t, os.WriteFile(upPath, []byte("-- old up\n"), 0644))
-		require.NoError(t, os.WriteFile(downPath, []byte("-- old down\n"), 0644))
+		assert.NoError(t, os.WriteFile(upPath, []byte("-- old up\n"), 0644))
+		assert.NoError(t, os.WriteFile(downPath, []byte("-- old down\n"), 0644))
 
 		latest := migrationFile{
 			path:      upPath,
@@ -293,16 +292,16 @@ type User struct {
 			direction: "up",
 		}
 
-		// ===== Act =====
+		// ===== Act ===== //
 		err := overwriteLatestMigration(module, "user", latest)
 
-		// ===== Assert =====
-		require.NoError(t, err)
+		// ===== Assert ===== //
+		assert.NoError(t, err)
 
 		upSQL, err := os.ReadFile(upPath)
-		require.NoError(t, err)
+		assert.NoError(t, err)
 		downSQL, err := os.ReadFile(downPath)
-		require.NoError(t, err)
+		assert.NoError(t, err)
 
 		assert.Equal(t, `ALTER TABLE users
     ADD COLUMN name VARCHAR(50) NOT NULL,
@@ -317,7 +316,7 @@ type User struct {
 	})
 
 	t.Run("skips unchanged alter overwrite", func(t *testing.T) {
-		// ===== Arrange =====
+		// ===== Arrange ===== //
 		module := makeTestMigrationModule(t, "iam", "user.go", `package entity
 
 import "github.com/google/uuid"
@@ -328,12 +327,12 @@ type User struct {
 	Name  string // 50
 }
 `)
-		require.NoError(t, os.WriteFile(filepath.Join(module.migrationDir, "000001_init_user.up.sql"), []byte(`CREATE TABLE users (
+		assert.NoError(t, os.WriteFile(filepath.Join(module.migrationDir, "000001_init_user.up.sql"), []byte(`CREATE TABLE users (
     id UUID PRIMARY KEY,
     email VARCHAR(20) NOT NULL UNIQUE
 );
 `), 0644))
-		require.NoError(t, os.WriteFile(filepath.Join(module.migrationDir, "000001_init_user.down.sql"), []byte("DROP TABLE IF EXISTS users;\n"), 0644))
+		assert.NoError(t, os.WriteFile(filepath.Join(module.migrationDir, "000001_init_user.down.sql"), []byte("DROP TABLE IF EXISTS users;\n"), 0644))
 		upPath := filepath.Join(module.migrationDir, "000002_alter_name_user.up.sql")
 		downPath := filepath.Join(module.migrationDir, "000002_alter_name_user.down.sql")
 		originalUp := `ALTER TABLE users
@@ -342,8 +341,8 @@ type User struct {
 		originalDown := `ALTER TABLE users
     DROP COLUMN IF EXISTS name;
 `
-		require.NoError(t, os.WriteFile(upPath, []byte(originalUp), 0644))
-		require.NoError(t, os.WriteFile(downPath, []byte(originalDown), 0644))
+		assert.NoError(t, os.WriteFile(upPath, []byte(originalUp), 0644))
+		assert.NoError(t, os.WriteFile(downPath, []byte(originalDown), 0644))
 
 		latest := migrationFile{
 			path:      upPath,
@@ -352,16 +351,16 @@ type User struct {
 			direction: "up",
 		}
 
-		// ===== Act =====
+		// ===== Act ===== //
 		err := overwriteLatestMigration(module, "user", latest)
 
-		// ===== Assert =====
-		require.NoError(t, err)
+		// ===== Assert ===== //
+		assert.NoError(t, err)
 
 		upSQL, err := os.ReadFile(upPath)
-		require.NoError(t, err)
+		assert.NoError(t, err)
 		downSQL, err := os.ReadFile(downPath)
-		require.NoError(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, originalUp, string(upSQL))
 		assert.Equal(t, originalDown, string(downSQL))
 	})
