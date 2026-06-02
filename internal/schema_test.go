@@ -159,7 +159,7 @@ func Test_Migration_BuildCreateTableSQL(t *testing.T) {
     id UUID PRIMARY KEY,
     user_id UUID NOT NULL,
     title VARCHAR(100) NOT NULL UNIQUE,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    CONSTRAINT fk_posts_users FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 `, sql)
 	})

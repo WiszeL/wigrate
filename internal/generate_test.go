@@ -101,10 +101,10 @@ type User struct {
 		assert.Equal(t, `ALTER TABLE users
     ADD COLUMN name VARCHAR(50) NOT NULL,
     ADD COLUMN role_id UUID NOT NULL,
-    ADD CONSTRAINT fk_users_role_id FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE;
+    ADD CONSTRAINT fk_users_roles FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE;
 `, string(upSQL))
 		assert.Equal(t, `ALTER TABLE users
-    DROP CONSTRAINT IF EXISTS fk_users_role_id,
+    DROP CONSTRAINT IF EXISTS fk_users_roles,
     DROP COLUMN IF EXISTS role_id,
     DROP COLUMN IF EXISTS name;
 `, string(downSQL))
@@ -163,22 +163,22 @@ type User struct {
 		assert.NoError(t, err)
 
 		assert.Equal(t, `ALTER TABLE users
-    DROP CONSTRAINT IF EXISTS fk_users_role_id,
+    DROP CONSTRAINT IF EXISTS fk_users_roles,
     DROP COLUMN IF EXISTS obsolete,
     ALTER COLUMN email TYPE VARCHAR(20),
     ALTER COLUMN age DROP NOT NULL,
     ADD CONSTRAINT uq_users_age UNIQUE (age),
     ADD COLUMN new_code VARCHAR(10) NOT NULL,
-    ADD CONSTRAINT fk_users_role_id FOREIGN KEY (role_id) REFERENCES teams(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT fk_users_teams FOREIGN KEY (role_id) REFERENCES teams(id) ON DELETE RESTRICT;
 `, string(upSQL))
 		assert.Equal(t, `ALTER TABLE users
-    DROP CONSTRAINT IF EXISTS fk_users_role_id,
+    DROP CONSTRAINT IF EXISTS fk_users_teams,
     DROP COLUMN IF EXISTS new_code,
     DROP CONSTRAINT IF EXISTS uq_users_age,
     ALTER COLUMN age SET NOT NULL,
     ALTER COLUMN email TYPE TEXT,
     ADD COLUMN obsolete TEXT NOT NULL,
-    ADD CONSTRAINT fk_users_role_id FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE;
+    ADD CONSTRAINT fk_users_roles FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE;
 `, string(downSQL))
 	})
 }
@@ -306,10 +306,10 @@ type User struct {
 		assert.Equal(t, `ALTER TABLE users
     ADD COLUMN name VARCHAR(50) NOT NULL,
     ADD COLUMN role_id UUID NOT NULL,
-    ADD CONSTRAINT fk_users_role_id FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE;
+    ADD CONSTRAINT fk_users_roles FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE;
 `, string(upSQL))
 		assert.Equal(t, `ALTER TABLE users
-    DROP CONSTRAINT IF EXISTS fk_users_role_id,
+    DROP CONSTRAINT IF EXISTS fk_users_roles,
     DROP COLUMN IF EXISTS role_id,
     DROP COLUMN IF EXISTS name;
 `, string(downSQL))

@@ -137,7 +137,7 @@ RoleID uuid.UUID // ref:roles del:noaction   → ON DELETE NO ACTION
 | Field name | PascalCase → snake_case | `FullName` → `full_name` |
 | Primary key | Field named `ID` or annotated `// pk` | `ID` → `id UUID PRIMARY KEY` |
 | Foreign key | Field ending in `ID` | `RoleID` → FK to `roles(id)` |
-| FK constraint name | `fk_<table>_<column>` | `fk_users_role_id` |
+| FK constraint name | `fk_<table>_<refTable>` | `fk_users_roles` |
 | Unique constraint name | `uq_<table>_<column>` | `uq_users_email` |
 
 ### Pluralization Rules
@@ -186,7 +186,7 @@ CREATE TABLE users (
     id UUID PRIMARY KEY,
     email VARCHAR(100) NOT NULL UNIQUE,
     role_id UUID NOT NULL,
-    FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE
+    CONSTRAINT fk_users_roles FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE
 );
 ```
 
@@ -200,26 +200,26 @@ Up:
 
 ```sql
 ALTER TABLE users
-    DROP CONSTRAINT IF EXISTS fk_users_role_id,
+    DROP CONSTRAINT IF EXISTS fk_users_roles,
     DROP COLUMN IF EXISTS obsolete,
     ALTER COLUMN email TYPE VARCHAR(100),
     ALTER COLUMN age DROP NOT NULL,
     ADD CONSTRAINT uq_users_age UNIQUE (age),
     ADD COLUMN name VARCHAR(50) NOT NULL,
-    ADD CONSTRAINT fk_users_role_id FOREIGN KEY (role_id) REFERENCES teams(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT fk_users_roles FOREIGN KEY (role_id) REFERENCES teams(id) ON DELETE RESTRICT;
 ```
 
 Down (reverses the alter):
 
 ```sql
 ALTER TABLE users
-    DROP CONSTRAINT IF EXISTS fk_users_role_id,
+    DROP CONSTRAINT IF EXISTS fk_users_roles,
     DROP COLUMN IF EXISTS name,
     DROP CONSTRAINT IF EXISTS uq_users_age,
     ALTER COLUMN age SET NOT NULL,
     ALTER COLUMN email TYPE TEXT,
     ADD COLUMN obsolete TEXT NOT NULL,
-    ADD CONSTRAINT fk_users_role_id FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE;
+    ADD CONSTRAINT fk_users_roles FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE;
 ```
 
 ---

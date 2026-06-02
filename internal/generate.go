@@ -145,7 +145,7 @@ func buildCreateTableSQL(schema tableSchema) string {
 
 	// Building foreign keys
 	for _, foreignKey := range schema.foreignKeys {
-		lines = append(lines, "    "+buildCreateForeignKeyDefinition(foreignKey))
+		lines = append(lines, "    "+buildCreateForeignKeyDefinition(schema.name, foreignKey))
 	}
 
 	return fmt.Sprintf("CREATE TABLE %s (\n%s\n);\n", schema.name, strings.Join(lines, ",\n"))
@@ -264,11 +264,11 @@ func dropColumnLine(column columnSchema) string {
 }
 
 func addForeignKeyLine(tableName string, foreignKey foreignKeySchema) string {
-	return "    ADD CONSTRAINT " + buildForeignKeyDefinition(tableName, foreignKey)
+	return "    ADD " + buildCreateForeignKeyDefinition(tableName, foreignKey)
 }
 
 func dropForeignKeyLine(tableName string, foreignKey foreignKeySchema) string {
-	return "    DROP CONSTRAINT IF EXISTS " + foreignKeyConstraintName(tableName, foreignKey.column)
+	return "    DROP CONSTRAINT IF EXISTS " + foreignKeyConstraintName(tableName, foreignKey.refTable)
 }
 
 func addUniqueLine(tableName string, column columnSchema) string {
@@ -293,33 +293,18 @@ func buildColumnDefinition(column columnSchema) string {
 	return strings.Join(parts, " ")
 }
 
-func buildCreateForeignKeyDefinition(foreignKey foreignKeySchema) string {
-	line := fmt.Sprintf(
-		"FOREIGN KEY (%s) REFERENCES %s(%s)",
-		foreignKey.column,
-		foreignKey.refTable,
-		foreignKey.refColumn,
-	)
-	if foreignKey.onDelete != "" {
-		line += " ON DELETE " + foreignKey.onDelete
-	}
-
-	return line
+func buildCreateForeignKeyDefinition(tableName string, foreignKey foreignKeySchema) string {
+	return "CONSTRAINT " + foreignKeyConstraintName(tableName, foreignKey.refTable) +
+		" FOREIGN KEY (" + foreignKey.column + ") REFERENCES " +
+		foreignKey.refTable + "(" + foreignKey.refColumn + ")" +
+		onDeleteClause(foreignKey.onDelete)
 }
 
-func buildForeignKeyDefinition(tableName string, foreignKey foreignKeySchema) string {
-	line := fmt.Sprintf(
-		"%s FOREIGN KEY (%s) REFERENCES %s(%s)",
-		foreignKeyConstraintName(tableName, foreignKey.column),
-		foreignKey.column,
-		foreignKey.refTable,
-		foreignKey.refColumn,
-	)
-	if foreignKey.onDelete != "" {
-		line += " ON DELETE " + foreignKey.onDelete
+func onDeleteClause(onDelete string) string {
+	if onDelete != "" {
+		return " ON DELETE " + onDelete
 	}
-
-	return line
+	return ""
 }
 
 func buildAlterColumnTypeLine(columnName string, dataType string) string {
@@ -351,8 +336,8 @@ func alterMigrationName(columns []string, entityName string) string {
 	return strings.Join(parts, "_")
 }
 
-func foreignKeyConstraintName(tableName string, columnName string) string {
-	return "fk_" + tableName + "_" + columnName
+func foreignKeyConstraintName(tableName string, refTable string) string {
+	return "fk_" + tableName + "_" + refTable
 }
 
 func buildUniqueConstraintDefinition(tableName string, columnName string) string {

@@ -273,19 +273,21 @@ func appendForeignKeyIfMissing(schema *tableSchema, foreignKey foreignKeySchema)
 }
 
 func removeForeignKeyByConstraintName(schema *tableSchema, constraintName string) {
-	prefix := "fk_" + schema.name + "_"
-	if !strings.HasPrefix(constraintName, prefix) {
-		return
+	for i, fk := range schema.foreignKeys {
+		if foreignKeyConstraintName(schema.name, fk.refTable) == constraintName {
+			schema.foreignKeys = append(schema.foreignKeys[:i], schema.foreignKeys[i+1:]...)
+			return
+		}
 	}
-	removeForeignKey(schema, strings.TrimPrefix(constraintName, prefix))
 }
 
 func removeUniqueByConstraintName(schema *tableSchema, constraintName string) {
-	prefix := "uq_" + schema.name + "_"
-	if !strings.HasPrefix(constraintName, prefix) {
-		return
+	for i, col := range schema.columns {
+		if uniqueConstraintName(schema.name, col.name) == constraintName {
+			schema.columns[i].unique = false
+			return
+		}
 	}
-	applyGeneratedUniqueConstraint(schema, strings.TrimPrefix(constraintName, prefix), false)
 }
 
 func removeForeignKey(schema *tableSchema, columnName string) {

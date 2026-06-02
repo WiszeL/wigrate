@@ -219,13 +219,13 @@ func TestReplayApplySQL(t *testing.T) {
 			{"drop unique", func() *tableSchema {
 				return &tableSchema{name: "users", columns: []columnSchema{{name: "e", unique: true}}}
 			}, "ALTER TABLE users\n    DROP CONSTRAINT IF EXISTS uq_users_e;\n", func(t *testing.T, s *tableSchema) { assert.False(t, s.columns[0].unique) }},
-			{"add FK", func() *tableSchema { return &tableSchema{name: "users", columns: []columnSchema{{name: "rid"}}} }, "ALTER TABLE users\n    ADD CONSTRAINT fk_users_rid FOREIGN KEY (rid) REFERENCES roles(id) ON DELETE CASCADE;\n", func(t *testing.T, s *tableSchema) {
+			{"add FK", func() *tableSchema { return &tableSchema{name: "users", columns: []columnSchema{{name: "rid"}}} }, "ALTER TABLE users\n    ADD CONSTRAINT fk_users_roles FOREIGN KEY (rid) REFERENCES roles(id) ON DELETE CASCADE;\n", func(t *testing.T, s *tableSchema) {
 				assert.Len(t, s.foreignKeys, 1)
 				assert.Equal(t, "CASCADE", s.foreignKeys[0].onDelete)
 			}},
 			{"drop FK", func() *tableSchema {
-				return &tableSchema{name: "users", foreignKeys: []foreignKeySchema{{column: "rid"}}}
-			}, "ALTER TABLE users\n    DROP CONSTRAINT IF EXISTS fk_users_rid;\n", func(t *testing.T, s *tableSchema) { assert.Empty(t, s.foreignKeys) }},
+				return &tableSchema{name: "users", foreignKeys: []foreignKeySchema{{column: "rid", refTable: "roles"}}}
+			}, "ALTER TABLE users\n    DROP CONSTRAINT IF EXISTS fk_users_roles;\n", func(t *testing.T, s *tableSchema) { assert.Empty(t, s.foreignKeys) }},
 			{"unrecognized line", func() *tableSchema { return &tableSchema{name: "users", columns: []columnSchema{{name: "id"}}} }, "ALTER TABLE users\n    BOGUS;\n", func(t *testing.T, s *tableSchema) { assert.Len(t, s.columns, 1) }},
 		}
 
@@ -360,7 +360,9 @@ func TestReplayHelpers(t *testing.T) {
 		tests := []tc{
 			{func() *tableSchema { return &tableSchema{name: "t"} }, func(s *tableSchema) { appendForeignKeyIfMissing(s, foreignKeySchema{column: "rid"}) }, func(t *testing.T, s *tableSchema) { assert.Len(t, s.foreignKeys, 1) }},
 			{func() *tableSchema { return &tableSchema{name: "t", foreignKeys: []foreignKeySchema{{column: "rid"}}} }, func(s *tableSchema) { appendForeignKeyIfMissing(s, foreignKeySchema{column: "rid"}) }, func(t *testing.T, s *tableSchema) { assert.Len(t, s.foreignKeys, 1) }},
-			{func() *tableSchema { return &tableSchema{name: "t", foreignKeys: []foreignKeySchema{{column: "rid"}}} }, func(s *tableSchema) { removeForeignKeyByConstraintName(s, "fk_t_rid") }, func(t *testing.T, s *tableSchema) { assert.Empty(t, s.foreignKeys) }},
+			{func() *tableSchema {
+				return &tableSchema{name: "t", foreignKeys: []foreignKeySchema{{column: "rid", refTable: "roles"}}}
+			}, func(s *tableSchema) { removeForeignKeyByConstraintName(s, "fk_t_roles") }, func(t *testing.T, s *tableSchema) { assert.Empty(t, s.foreignKeys) }},
 			{func() *tableSchema { return &tableSchema{name: "t", foreignKeys: []foreignKeySchema{{column: "rid"}}} }, func(s *tableSchema) { removeForeignKey(s, "rid") }, func(t *testing.T, s *tableSchema) { assert.Empty(t, s.foreignKeys) }},
 		}
 
