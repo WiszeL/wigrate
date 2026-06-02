@@ -91,8 +91,7 @@ func makePerModule(module migrationModule, overwriteLatest bool) error {
 		return fmt.Errorf("read entity dir: %w", err)
 	}
 	for _, entry := range entries {
-		// Entity discovery is intentionally file-based for now.
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".go" {
+		if !isGoEntityFile(entry.Name()) {
 			continue
 		}
 
@@ -134,6 +133,10 @@ func generateMigrationForEntity(module migrationModule, goName string, overwrite
 
 func runCommand(cmd string, args ...string) error {
 	return runCommandFunc(cmd, args...)
+}
+
+func isGoEntityFile(name string) bool {
+	return filepath.Ext(name) == ".go" && !strings.HasSuffix(name, "_test.go")
 }
 
 var runCommandFunc = func(cmd string, args ...string) error {
