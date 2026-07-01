@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"runtime/debug"
 	"strconv"
 
 	"github.com/wiszel/wigrate/internal"
@@ -50,6 +51,9 @@ func run(args []string, deps cliDependencies) error {
 		return runDown(args[1:], deps.migrateDown)
 	case "status":
 		return runStatus(args[1:], deps.migrateStatus)
+	case "-v", "--version", "version":
+		printVersion()
+		return nil
 	case "-h", "--help", "help":
 		printUsage()
 		return nil
@@ -131,10 +135,20 @@ func runStatus(args []string, migrateStatus migrateStatusFunc) error {
 	return migrateStatus(*moduleName)
 }
 
+func printVersion() {
+	bi, ok := debug.ReadBuildInfo()
+	if ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+		fmt.Printf("wigrate %s\n", bi.Main.Version)
+	} else {
+		fmt.Println("wigrate (dev)")
+	}
+}
+
 func printUsage() {
 	fmt.Fprintln(os.Stderr, "Usage:")
 	fmt.Fprintln(os.Stderr, "  wigrate gen [-o|--overwrite] [-m=<module>|--module=<module>] [--modules-dir=<dir>] [--dry-run]")
 	fmt.Fprintln(os.Stderr, "  wigrate up [-m=<module>|--module=<module>] [--modules-dir=<dir>]")
 	fmt.Fprintln(os.Stderr, "  wigrate down <steps> [-m=<module>|--module=<module>] [--modules-dir=<dir>]")
 	fmt.Fprintln(os.Stderr, "  wigrate status [-m=<module>|--module=<module>] [--modules-dir=<dir>]")
+	fmt.Fprintln(os.Stderr, "  wigrate version")
 }
