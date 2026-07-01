@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func Test_Migration_MakeInitMigration(t *testing.T) {
@@ -88,7 +89,9 @@ type User struct {
 		defer restoreRunCommand()
 
 		// ===== Act ===== //
-		err := makeAlterMigration(module, "user")
+		entries, err := os.ReadDir(module.migrationDir)
+		require.NoError(t, err)
+		err = makeAlterMigration(module, entries, "user")
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)
@@ -101,10 +104,10 @@ type User struct {
 		assert.Equal(t, `ALTER TABLE users
     ADD COLUMN name VARCHAR(50) NOT NULL,
     ADD COLUMN role_id UUID NOT NULL,
-    ADD CONSTRAINT fk_users_roles FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE;
+    ADD CONSTRAINT fk_users_role_id FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE;
 `, string(upSQL))
 		assert.Equal(t, `ALTER TABLE users
-    DROP CONSTRAINT IF EXISTS fk_users_roles,
+    DROP CONSTRAINT IF EXISTS fk_users_role_id,
     DROP COLUMN IF EXISTS role_id,
     DROP COLUMN IF EXISTS name;
 `, string(downSQL))
@@ -134,7 +137,7 @@ type User struct {
     nickname TEXT NOT NULL,
     role_id UUID NOT NULL,
     obsolete TEXT NOT NULL,
-    FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE
+    CONSTRAINT fk_users_role_id FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE
 );
 `), 0644))
 		assert.NoError(t, os.WriteFile(filepath.Join(module.migrationDir, "000001_init_user.down.sql"), []byte("DROP TABLE IF EXISTS users;\n"), 0644))
@@ -152,7 +155,9 @@ type User struct {
 		defer restoreRunCommand()
 
 		// ===== Act ===== //
-		err := makeAlterMigration(module, "user")
+		entries, err := os.ReadDir(module.migrationDir)
+		require.NoError(t, err)
+		err = makeAlterMigration(module, entries, "user")
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)
@@ -163,22 +168,22 @@ type User struct {
 		assert.NoError(t, err)
 
 		assert.Equal(t, `ALTER TABLE users
-    DROP CONSTRAINT IF EXISTS fk_users_roles,
+    DROP CONSTRAINT IF EXISTS fk_users_role_id,
     DROP COLUMN IF EXISTS obsolete,
     ALTER COLUMN email TYPE VARCHAR(20),
     ALTER COLUMN age DROP NOT NULL,
     ADD CONSTRAINT uq_users_age UNIQUE (age),
     ADD COLUMN new_code VARCHAR(10) NOT NULL,
-    ADD CONSTRAINT fk_users_teams FOREIGN KEY (role_id) REFERENCES teams(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT fk_users_role_id FOREIGN KEY (role_id) REFERENCES teams(id) ON DELETE RESTRICT;
 `, string(upSQL))
 		assert.Equal(t, `ALTER TABLE users
-    DROP CONSTRAINT IF EXISTS fk_users_teams,
+    DROP CONSTRAINT IF EXISTS fk_users_role_id,
     DROP COLUMN IF EXISTS new_code,
     DROP CONSTRAINT IF EXISTS uq_users_age,
     ALTER COLUMN age SET NOT NULL,
     ALTER COLUMN email TYPE TEXT,
     ADD COLUMN obsolete TEXT NOT NULL,
-    ADD CONSTRAINT fk_users_roles FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE;
+    ADD CONSTRAINT fk_users_role_id FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE;
 `, string(downSQL))
 	})
 }
@@ -210,7 +215,9 @@ type User struct {
 		defer restoreRunCommand()
 
 		// ===== Act ===== //
-		err := makeAlterMigration(module, "user")
+		entries, err := os.ReadDir(module.migrationDir)
+		require.NoError(t, err)
+		err = makeAlterMigration(module, entries, "user")
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)
@@ -243,7 +250,9 @@ type User struct {
 		}
 
 		// ===== Act ===== //
-		err := overwriteLatestMigration(module, "user", latest)
+		entries, err := os.ReadDir(module.migrationDir)
+		require.NoError(t, err)
+		err = overwriteLatestMigration(module, entries, "user", latest)
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)
@@ -293,7 +302,9 @@ type User struct {
 		}
 
 		// ===== Act ===== //
-		err := overwriteLatestMigration(module, "user", latest)
+		entries, err := os.ReadDir(module.migrationDir)
+		require.NoError(t, err)
+		err = overwriteLatestMigration(module, entries, "user", latest)
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)
@@ -306,10 +317,10 @@ type User struct {
 		assert.Equal(t, `ALTER TABLE users
     ADD COLUMN name VARCHAR(50) NOT NULL,
     ADD COLUMN role_id UUID NOT NULL,
-    ADD CONSTRAINT fk_users_roles FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE;
+    ADD CONSTRAINT fk_users_role_id FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE;
 `, string(upSQL))
 		assert.Equal(t, `ALTER TABLE users
-    DROP CONSTRAINT IF EXISTS fk_users_roles,
+    DROP CONSTRAINT IF EXISTS fk_users_role_id,
     DROP COLUMN IF EXISTS role_id,
     DROP COLUMN IF EXISTS name;
 `, string(downSQL))
@@ -352,7 +363,9 @@ type User struct {
 		}
 
 		// ===== Act ===== //
-		err := overwriteLatestMigration(module, "user", latest)
+		entries, err := os.ReadDir(module.migrationDir)
+		require.NoError(t, err)
+		err = overwriteLatestMigration(module, entries, "user", latest)
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)

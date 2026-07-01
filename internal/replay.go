@@ -4,22 +4,20 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 )
 
-func readGeneratedSchema(module migrationModule, entityName string, before *migrationFile) (tableSchema, error) {
-	files, err := findEntityMigrationFiles(module, entityName)
-	if err != nil {
-		return tableSchema{}, err
-	}
+func readGeneratedSchema(module migrationModule, entries []os.DirEntry, entityName string, before *migrationFile) (tableSchema, error) {
+	files := findEntityMigrationFiles(module, entries, entityName)
 
 	// Sorting migration files by name
 	sort.Slice(files, func(i int, j int) bool {
 		return files[i].baseName < files[j].baseName
 	})
 
-	// Replaying up migration files to reconstruct schema state.
+	// Replaying up migration files to reconstruct schema state
 	schema := tableSchema{name: tableNameFromEntity(entityName)}
 	for _, file := range files {
 		if file.direction != "up" {
@@ -39,12 +37,7 @@ func readGeneratedSchema(module migrationModule, entityName string, before *migr
 	return schema, nil
 }
 
-func findEntityMigrationFiles(module migrationModule, entityName string) ([]migrationFile, error) {
-	entries, err := os.ReadDir(module.migrationDir)
-	if err != nil {
-		return nil, fmt.Errorf("read migration dir: %w", err)
-	}
-
+func findEntityMigrationFiles(module migrationModule, entries []os.DirEntry, entityName string) []migrationFile {
 	var files []migrationFile
 	for _, entry := range entries {
 		if entry.IsDir() {
@@ -57,11 +50,11 @@ func findEntityMigrationFiles(module migrationModule, entityName string) ([]migr
 		}
 	}
 
-	return files, nil
+	return files
 }
 
 func applyGeneratedSQL(schema *tableSchema, sql string) {
-	// This parser only needs to understand SQL emitted by this package.
+	// This parser only needs to understand SQL emitted by this package
 	// Cleaning and skipping blank/DDL lines
 	for line := range strings.SplitSeq(sql, "\n") {
 		line = cleanGeneratedSQLLine(line)
@@ -73,10 +66,10 @@ func applyGeneratedSQL(schema *tableSchema, sql string) {
 		switch {
 		case strings.HasPrefix(line, "ADD CONSTRAINT ") && strings.Contains(line, " UNIQUE "):
 			if columnName, ok := parseGeneratedUniqueConstraint(line); ok {
-				applyGeneratedUniqueConstraint(schema, columnName, true)
+				applyGeneratedUniqueConstraint(schema, columnName)
 			}
-		case strings.HasPrefix(line, "FOREIGN KEY "):
-			if fk, ok := parseGeneratedForeignKey(line); ok {
+		case strings.HasPrefix(line, "CONSTRAINT ") && strings.Contains(line, " FOREIGN KEY "):
+			if fk, ok := parseGeneratedAlterForeignKey(line); ok {
 				appendForeignKeyIfMissing(schema, fk)
 			}
 		case strings.HasPrefix(line, "ADD CONSTRAINT "):
@@ -133,7 +126,7 @@ func parseGeneratedColumn(line string) (columnSchema, bool) {
 	// Extracting data type (may contain spaces, e.g. DOUBLE PRECISION)
 	var dataTypeParts []string
 	for i := 1; i < len(parts); i++ {
-		if parts[i] == "PRIMARY" || parts[i] == "NOT" {
+		if parts[i] == "PRIMARY" || parts[i] == "NOT" || parts[i] == "UNIQUE" {
 			break
 		}
 		dataTypeParts = append(dataTypeParts, parts[i])
@@ -202,14 +195,14 @@ func parseGeneratedForeignKey(line string) (foreignKeySchema, bool) {
 	}
 
 	foreignKey := foreignKeySchema{
-		column:    line[columnStart+1 : columnEnd],
-		refTable:  reference[:refTableEnd],
-		refColumn: reference[refTableEnd+1 : refColumnEnd],
+		column:    strings.TrimSpace(line[columnStart+1 : columnEnd]),
+		refTable:  strings.TrimSpace(reference[:refTableEnd]),
+		refColumn: strings.TrimSpace(reference[refTableEnd+1 : refColumnEnd]),
 	}
 
 	// Extracting ON DELETE action
 	if _, after, ok := strings.Cut(line, " ON DELETE "); ok {
-		foreignKey.onDelete = after
+		foreignKey.onDelete = strings.TrimSpace(after)
 	}
 
 	return foreignKey, true
@@ -238,80 +231,60 @@ func applyGeneratedColumnAlter(schema *tableSchema, line string) {
 }
 
 func appendColumnIfMissing(schema *tableSchema, column columnSchema) {
-	if _, ok := findColumnIndex(schema.columns, column.name); ok {
+	if slices.IndexFunc(schema.columns, func(c columnSchema) bool { return c.name == column.name }) >= 0 {
 		return
 	}
 	schema.columns = append(schema.columns, column)
 }
 
 func removeColumn(schema *tableSchema, columnName string) {
-	if index, ok := findColumnIndex(schema.columns, columnName); ok {
-		schema.columns = append(schema.columns[:index], schema.columns[index+1:]...)
+	if i := slices.IndexFunc(schema.columns, func(c columnSchema) bool { return c.name == columnName }); i >= 0 {
+		schema.columns = slices.Delete(schema.columns, i, i+1)
 	}
 	removeForeignKey(schema, columnName)
 }
 
 func updateColumn(schema *tableSchema, columnName string, update func(*columnSchema)) {
-	index, ok := findColumnIndex(schema.columns, columnName)
-	if !ok {
+	i := slices.IndexFunc(schema.columns, func(c columnSchema) bool { return c.name == columnName })
+	if i < 0 {
 		return
 	}
-	update(&schema.columns[index])
+	update(&schema.columns[i])
 }
 
-func applyGeneratedUniqueConstraint(schema *tableSchema, columnName string, unique bool) {
+func applyGeneratedUniqueConstraint(schema *tableSchema, columnName string) {
 	updateColumn(schema, columnName, func(column *columnSchema) {
-		column.unique = unique
+		column.unique = true
 	})
 }
 
 func appendForeignKeyIfMissing(schema *tableSchema, foreignKey foreignKeySchema) {
-	if _, ok := findForeignKeyIndex(schema.foreignKeys, foreignKey.column); ok {
+	if slices.IndexFunc(schema.foreignKeys, func(fk foreignKeySchema) bool { return fk.column == foreignKey.column }) >= 0 {
 		return
 	}
 	schema.foreignKeys = append(schema.foreignKeys, foreignKey)
 }
 
 func removeForeignKeyByConstraintName(schema *tableSchema, constraintName string) {
-	for i, fk := range schema.foreignKeys {
-		if foreignKeyConstraintName(schema.name, fk.refTable) == constraintName {
-			schema.foreignKeys = append(schema.foreignKeys[:i], schema.foreignKeys[i+1:]...)
-			return
-		}
+	i := slices.IndexFunc(schema.foreignKeys, func(fk foreignKeySchema) bool {
+		return foreignKeyConstraintName(schema.name, fk.column) == constraintName
+	})
+	if i >= 0 {
+		schema.foreignKeys = slices.Delete(schema.foreignKeys, i, i+1)
 	}
 }
 
 func removeUniqueByConstraintName(schema *tableSchema, constraintName string) {
-	for i, col := range schema.columns {
-		if uniqueConstraintName(schema.name, col.name) == constraintName {
-			schema.columns[i].unique = false
-			return
-		}
+	i := slices.IndexFunc(schema.columns, func(col columnSchema) bool {
+		return uniqueConstraintName(schema.name, col.name) == constraintName
+	})
+	if i >= 0 {
+		schema.columns[i].unique = false
 	}
 }
 
 func removeForeignKey(schema *tableSchema, columnName string) {
-	if index, ok := findForeignKeyIndex(schema.foreignKeys, columnName); ok {
-		schema.foreignKeys = append(schema.foreignKeys[:index], schema.foreignKeys[index+1:]...)
+	if i := slices.IndexFunc(schema.foreignKeys, func(fk foreignKeySchema) bool { return fk.column == columnName }); i >= 0 {
+		schema.foreignKeys = slices.Delete(schema.foreignKeys, i, i+1)
 	}
-}
-
-func findColumnIndex(columns []columnSchema, name string) (int, bool) {
-	for i, column := range columns {
-		if column.name == name {
-			return i, true
-		}
-	}
-
-	return 0, false
-}
-
-func findForeignKeyIndex(foreignKeys []foreignKeySchema, columnName string) (int, bool) {
-	for i, foreignKey := range foreignKeys {
-		if foreignKey.column == columnName {
-			return i, true
-		}
-	}
-
-	return 0, false
 }

@@ -53,10 +53,9 @@ func parseEntitySchema(module migrationModule, entityName string) (tableSchema, 
 	}
 
 	// Finding the target struct
-	structName := pascalCase(entityName)
-	structType := findStruct(file, structName)
+	structType, structName := findStruct(file, entityName)
 	if structType == nil {
-		return tableSchema{}, fmt.Errorf("entity struct %s not found in %s", structName, entityPath)
+		return tableSchema{}, fmt.Errorf("entity struct for %s not found in %s", entityName, entityPath)
 	}
 
 	schema := tableSchema{name: tableNameFromEntity(entityName)}
@@ -80,7 +79,7 @@ func parseEntitySchema(module migrationModule, entityName string) (tableSchema, 
 
 func mapStructFieldToSchema(structName string, field *ast.Field) ([]columnSchema, []foreignKeySchema, error) {
 	if len(field.Names) == 0 {
-		return nil, nil, nil
+		return nil, nil, fmt.Errorf("%s: embedded fields are not supported", structName)
 	}
 
 	// Parsing the field comment
@@ -115,7 +114,9 @@ func mapStructFieldToSchema(structName string, field *ast.Field) ([]columnSchema
 	return columns, foreignKeys, nil
 }
 
-func findStruct(file *ast.File, structName string) *ast.StructType {
+// findStruct locates a struct whose snake_case name matches entityName.
+// Returns the struct type and the actual declared name (for error messages).
+func findStruct(file *ast.File, entityName string) (*ast.StructType, string) {
 	for _, decl := range file.Decls {
 		genDecl, ok := decl.(*ast.GenDecl)
 		if !ok || genDecl.Tok != token.TYPE {
@@ -124,18 +125,22 @@ func findStruct(file *ast.File, structName string) *ast.StructType {
 
 		for _, spec := range genDecl.Specs {
 			typeSpec, ok := spec.(*ast.TypeSpec)
-			if !ok || typeSpec.Name.Name != structName {
+			if !ok {
+				continue
+			}
+
+			if snakeCase(typeSpec.Name.Name) != entityName {
 				continue
 			}
 
 			structType, ok := typeSpec.Type.(*ast.StructType)
 			if ok {
-				return structType
+				return structType, typeSpec.Name.Name
 			}
 		}
 	}
 
-	return nil
+	return nil, ""
 }
 
 func parseFieldComment(field *ast.Field) (fieldComment, error) {
@@ -223,7 +228,11 @@ func mapFieldToColumn(fieldName string, expr ast.Expr, comment fieldComment) (co
 
 func mapFieldToForeignKey(fieldName string, column columnSchema, comment fieldComment) (foreignKeySchema, bool, error) {
 	// Checking FK naming convention
-	if fieldName == "ID" || !strings.HasSuffix(fieldName, "ID") {
+	isFK := fieldName != "ID" && strings.HasSuffix(fieldName, "ID") && !strings.HasSuffix(fieldName, "UUID")
+	if !isFK {
+		if comment.refTable != "" || comment.deleteRule != "" {
+			return foreignKeySchema{}, false, fmt.Errorf("ref:/del: annotations require a field name ending in ID (not UUID)")
+		}
 		return foreignKeySchema{}, false, nil
 	}
 

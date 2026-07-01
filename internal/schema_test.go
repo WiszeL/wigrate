@@ -85,6 +85,7 @@ type Custom struct {
 
 		// ===== Act ===== //
 		schema, err := parseEntitySchema(module, "custom")
+
 		// ===== Assert ===== //
 		assert.NoError(t, err)
 		assert.Len(t, schema.columns, 2)
@@ -107,6 +108,7 @@ type Item struct {
 
 		// ===== Act ===== //
 		schema, err := parseEntitySchema(module, "item")
+
 		// ===== Assert ===== //
 		assert.NoError(t, err)
 		assert.Len(t, schema.columns, 3)
@@ -128,6 +130,7 @@ type Product struct {
 
 		// ===== Act ===== //
 		schema, err := parseEntitySchema(module, "product")
+
 		// ===== Assert ===== //
 		assert.NoError(t, err)
 		assert.Len(t, schema.columns, 2)
@@ -159,7 +162,7 @@ func Test_Migration_BuildCreateTableSQL(t *testing.T) {
     id UUID PRIMARY KEY,
     user_id UUID NOT NULL,
     title VARCHAR(100) NOT NULL UNIQUE,
-    CONSTRAINT fk_posts_users FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    CONSTRAINT fk_posts_user_id FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 `, sql)
 	})
@@ -180,7 +183,6 @@ func Test_Migration_BuildDropTableSQL(t *testing.T) {
 
 func Test_Schema_SnakeCase(t *testing.T) {
 	t.Run("converts camel case", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		result := snakeCase("UserID")
 		// ===== Assert ===== //
@@ -188,7 +190,6 @@ func Test_Schema_SnakeCase(t *testing.T) {
 	})
 
 	t.Run("converts ID to id", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		result := snakeCase("ID")
 		// ===== Assert ===== //
@@ -196,7 +197,6 @@ func Test_Schema_SnakeCase(t *testing.T) {
 	})
 
 	t.Run("handles HTML in acronym", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		result := snakeCase("HTMLParser")
 		// ===== Assert ===== //
@@ -204,7 +204,6 @@ func Test_Schema_SnakeCase(t *testing.T) {
 	})
 
 	t.Run("preserves existing underscores", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		result := snakeCase("already_snake")
 		// ===== Assert ===== //
@@ -212,19 +211,15 @@ func Test_Schema_SnakeCase(t *testing.T) {
 	})
 
 	t.Run("handles single character", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		result := snakeCase("A")
-
 		// ===== Assert ===== //
 		assert.Equal(t, "a", result)
 	})
 
 	t.Run("handles empty string", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		result := snakeCase("")
-
 		// ===== Assert ===== //
 		assert.Equal(t, "", result)
 	})
@@ -232,16 +227,13 @@ func Test_Schema_SnakeCase(t *testing.T) {
 
 func Test_Schema_PascalCase(t *testing.T) {
 	t.Run("converts snake case", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		result := pascalCase("user")
-
 		// ===== Assert ===== //
 		assert.Equal(t, "User", result)
 	})
 
 	t.Run("converts multi-word snake case", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		result := pascalCase("user_profile")
 		// ===== Assert ===== //
@@ -249,19 +241,15 @@ func Test_Schema_PascalCase(t *testing.T) {
 	})
 
 	t.Run("handles empty string", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		result := pascalCase("")
-
 		// ===== Assert ===== //
 		assert.Equal(t, "", result)
 	})
 
 	t.Run("handles single word", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		result := pascalCase("user")
-
 		// ===== Assert ===== //
 		assert.Equal(t, "User", result)
 	})
@@ -269,79 +257,62 @@ func Test_Schema_PascalCase(t *testing.T) {
 
 func Test_Schema_PluralizeSnakeCase(t *testing.T) {
 	t.Run("appends s for regular words", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		result := pluralizeSnakeCase("user")
-
 		// ===== Assert ===== //
 		assert.Equal(t, "users", result)
 	})
 
 	t.Run("changes y to ies after consonant", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		result := pluralizeSnakeCase("category")
-
 		// ===== Assert ===== //
 		assert.Equal(t, "categories", result)
 	})
 
 	t.Run("keeps y after vowel", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		result := pluralizeSnakeCase("toy")
-
 		// ===== Assert ===== //
 		assert.Equal(t, "toys", result)
 	})
 
 	t.Run("appends es for s ending", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		result := pluralizeSnakeCase("status")
-
 		// ===== Assert ===== //
 		assert.Equal(t, "statuses", result)
 	})
 
 	t.Run("appends es for x ending", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		result := pluralizeSnakeCase("box")
-
 		// ===== Assert ===== //
 		assert.Equal(t, "boxes", result)
 	})
 
 	t.Run("appends es for z ending", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		result := pluralizeSnakeCase("quiz")
-
 		// ===== Assert ===== //
 		assert.Equal(t, "quizes", result)
 	})
 
 	t.Run("appends es for ch ending", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		result := pluralizeSnakeCase("match")
-
 		// ===== Assert ===== //
 		assert.Equal(t, "matches", result)
 	})
 
 	t.Run("appends es for sh ending", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		result := pluralizeSnakeCase("dish")
-
 		// ===== Assert ===== //
 		assert.Equal(t, "dishes", result)
 	})
 
 	t.Run("handles empty string", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		result := pluralizeSnakeCase("")
 		// ===== Assert ===== //
@@ -351,7 +322,6 @@ func Test_Schema_PluralizeSnakeCase(t *testing.T) {
 
 func Test_Schema_IdentToSQLType(t *testing.T) {
 	t.Run("maps string to TEXT", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		typ, err := identToSQLType("string", fieldComment{})
 		// ===== Assert ===== //
@@ -360,7 +330,6 @@ func Test_Schema_IdentToSQLType(t *testing.T) {
 	})
 
 	t.Run("maps string with length to VARCHAR", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		typ, err := identToSQLType("string", fieldComment{length: 50})
 		// ===== Assert ===== //
@@ -369,7 +338,6 @@ func Test_Schema_IdentToSQLType(t *testing.T) {
 	})
 
 	t.Run("maps int to INTEGER", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		typ, err := identToSQLType("int", fieldComment{})
 		// ===== Assert ===== //
@@ -378,7 +346,6 @@ func Test_Schema_IdentToSQLType(t *testing.T) {
 	})
 
 	t.Run("maps int32 to INTEGER", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		typ, err := identToSQLType("int32", fieldComment{})
 		// ===== Assert ===== //
@@ -387,7 +354,6 @@ func Test_Schema_IdentToSQLType(t *testing.T) {
 	})
 
 	t.Run("maps int64 to BIGINT", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		typ, err := identToSQLType("int64", fieldComment{})
 		// ===== Assert ===== //
@@ -396,7 +362,6 @@ func Test_Schema_IdentToSQLType(t *testing.T) {
 	})
 
 	t.Run("maps bool to BOOLEAN", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		typ, err := identToSQLType("bool", fieldComment{})
 		// ===== Assert ===== //
@@ -405,7 +370,6 @@ func Test_Schema_IdentToSQLType(t *testing.T) {
 	})
 
 	t.Run("maps float32 to REAL", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		typ, err := identToSQLType("float32", fieldComment{})
 		// ===== Assert ===== //
@@ -414,7 +378,6 @@ func Test_Schema_IdentToSQLType(t *testing.T) {
 	})
 
 	t.Run("maps float64 to DOUBLE PRECISION", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		typ, err := identToSQLType("float64", fieldComment{})
 		// ===== Assert ===== //
@@ -423,7 +386,6 @@ func Test_Schema_IdentToSQLType(t *testing.T) {
 	})
 
 	t.Run("maps time.Time to TIMESTAMPTZ", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		typ, err := identToSQLType("time.Time", fieldComment{})
 		// ===== Assert ===== //
@@ -432,7 +394,6 @@ func Test_Schema_IdentToSQLType(t *testing.T) {
 	})
 
 	t.Run("maps uuid.UUID to UUID", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		typ, err := identToSQLType("uuid.UUID", fieldComment{})
 		// ===== Assert ===== //
@@ -441,7 +402,6 @@ func Test_Schema_IdentToSQLType(t *testing.T) {
 	})
 
 	t.Run("returns error for unsupported type", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		_, err := identToSQLType("unsupported.Type", fieldComment{})
 		// ===== Assert ===== //
@@ -452,7 +412,6 @@ func Test_Schema_IdentToSQLType(t *testing.T) {
 
 func Test_Schema_ParseFieldComment(t *testing.T) {
 	t.Run("returns empty comment for no comment", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		comment, err := parseFieldComment(&ast.Field{})
 		// ===== Assert ===== //
@@ -461,7 +420,6 @@ func Test_Schema_ParseFieldComment(t *testing.T) {
 	})
 
 	t.Run("parses null token", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		comment, err := parseFieldComment(&ast.Field{
 			Comment: &ast.CommentGroup{
@@ -474,7 +432,6 @@ func Test_Schema_ParseFieldComment(t *testing.T) {
 	})
 
 	t.Run("parses unique token", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		comment, err := parseFieldComment(&ast.Field{
 			Comment: &ast.CommentGroup{
@@ -487,7 +444,6 @@ func Test_Schema_ParseFieldComment(t *testing.T) {
 	})
 
 	t.Run("parses length token", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		comment, err := parseFieldComment(&ast.Field{
 			Comment: &ast.CommentGroup{
@@ -500,7 +456,6 @@ func Test_Schema_ParseFieldComment(t *testing.T) {
 	})
 
 	t.Run("parses ref table", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		comment, err := parseFieldComment(&ast.Field{
 			Comment: &ast.CommentGroup{
@@ -513,7 +468,6 @@ func Test_Schema_ParseFieldComment(t *testing.T) {
 	})
 
 	t.Run("parses delete rule", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		comment, err := parseFieldComment(&ast.Field{
 			Comment: &ast.CommentGroup{
@@ -526,7 +480,6 @@ func Test_Schema_ParseFieldComment(t *testing.T) {
 	})
 
 	t.Run("parses multiple tokens", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		comment, err := parseFieldComment(&ast.Field{
 			Comment: &ast.CommentGroup{
@@ -543,7 +496,6 @@ func Test_Schema_ParseFieldComment(t *testing.T) {
 	})
 
 	t.Run("returns error for empty ref table", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		_, err := parseFieldComment(&ast.Field{
 			Comment: &ast.CommentGroup{
@@ -556,7 +508,6 @@ func Test_Schema_ParseFieldComment(t *testing.T) {
 	})
 
 	t.Run("returns error for invalid delete rule", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		_, err := parseFieldComment(&ast.Field{
 			Comment: &ast.CommentGroup{
@@ -569,7 +520,6 @@ func Test_Schema_ParseFieldComment(t *testing.T) {
 	})
 
 	t.Run("returns error for invalid token", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		_, err := parseFieldComment(&ast.Field{
 			Comment: &ast.CommentGroup{
@@ -582,7 +532,6 @@ func Test_Schema_ParseFieldComment(t *testing.T) {
 	})
 
 	t.Run("returns error for zero length", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		_, err := parseFieldComment(&ast.Field{
 			Comment: &ast.CommentGroup{
@@ -595,7 +544,6 @@ func Test_Schema_ParseFieldComment(t *testing.T) {
 	})
 
 	t.Run("returns error for negative length", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		_, err := parseFieldComment(&ast.Field{
 			Comment: &ast.CommentGroup{
@@ -610,7 +558,6 @@ func Test_Schema_ParseFieldComment(t *testing.T) {
 
 func Test_Schema_NormalizeDeleteRule(t *testing.T) {
 	t.Run("normalizes cascade", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		result, err := normalizeDeleteRule("cascade")
 		// ===== Assert ===== //
@@ -619,7 +566,6 @@ func Test_Schema_NormalizeDeleteRule(t *testing.T) {
 	})
 
 	t.Run("normalizes setnull", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		result, err := normalizeDeleteRule("setnull")
 		// ===== Assert ===== //
@@ -628,7 +574,6 @@ func Test_Schema_NormalizeDeleteRule(t *testing.T) {
 	})
 
 	t.Run("normalizes restrict", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		result, err := normalizeDeleteRule("restrict")
 		// ===== Assert ===== //
@@ -637,7 +582,6 @@ func Test_Schema_NormalizeDeleteRule(t *testing.T) {
 	})
 
 	t.Run("normalizes noaction", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		result, err := normalizeDeleteRule("noaction")
 		// ===== Assert ===== //
@@ -646,7 +590,6 @@ func Test_Schema_NormalizeDeleteRule(t *testing.T) {
 	})
 
 	t.Run("returns error for unsupported rule", func(t *testing.T) {
-		// ===== Arrange ===== //
 		// ===== Act ===== //
 		_, err := normalizeDeleteRule("invalid")
 		// ===== Assert ===== //
@@ -670,4 +613,89 @@ func makeTestMigrationModule(t *testing.T, moduleName string, entityFile string,
 		entityDir:    entityDir,
 		migrationDir: migrationDir,
 	}
+}
+
+// TestSchemaParserRobustness covers the hardening fixes (B5-B8).
+func TestSchemaParserRobustness(t *testing.T) {
+	t.Run("B5: acronym struct name (APIKey) found by snake_case match", func(t *testing.T) {
+		// pascalCase("api_key") = "ApiKey" ≠ "APIKey"; findStruct must match by snakeCase.
+		// ===== Arrange ===== //
+		module := makeTestMigrationModule(t, "iam", "api_key.go", `package entity
+
+import "github.com/google/uuid"
+
+type APIKey struct {
+	ID    uuid.UUID
+	Token string
+}
+`)
+
+		// ===== Act ===== //
+		schema, err := parseEntitySchema(module, "api_key")
+
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.Equal(t, "api_keys", schema.name)
+		assert.Len(t, schema.columns, 2)
+	})
+
+	t.Run("B6: UUID-suffixed field does not produce a foreign key", func(t *testing.T) {
+		// ===== Arrange ===== //
+		module := makeTestMigrationModule(t, "iam", "user.go", `package entity
+
+import "github.com/google/uuid"
+
+type User struct {
+	ID        uuid.UUID
+	OwnerUUID uuid.UUID
+}
+`)
+
+		// ===== Act ===== //
+		schema, err := parseEntitySchema(module, "user")
+
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.Empty(t, schema.foreignKeys)
+	})
+
+	t.Run("B7: ref: annotation on non-ID field returns error", func(t *testing.T) {
+		// ===== Arrange ===== //
+		module := makeTestMigrationModule(t, "iam", "user.go", `package entity
+
+type User struct {
+	ID    int
+	Owner string // ref:users
+}
+`)
+
+		// ===== Act ===== //
+		_, err := parseEntitySchema(module, "user")
+
+		// ===== Assert ===== //
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "ref:/del:")
+	})
+
+	t.Run("B8: embedded struct returns error", func(t *testing.T) {
+		// ===== Arrange ===== //
+		module := makeTestMigrationModule(t, "iam", "user.go", `package entity
+
+import "github.com/google/uuid"
+
+type Base struct{ ID uuid.UUID }
+
+type User struct {
+	Base
+	Name string
+}
+`)
+
+		// ===== Act ===== //
+		_, err := parseEntitySchema(module, "user")
+
+		// ===== Assert ===== //
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "embedded")
+	})
 }

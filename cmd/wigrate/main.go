@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"strconv"
-	"strings"
 
 	"github.com/wiszel/wigrate/internal"
 )
@@ -60,22 +59,22 @@ func run(args []string, deps cliDependencies) error {
 	}
 }
 
-func runGen(args []string, makeMigration makeMigrationFunc) error {
-	// Getting the flags
-	flags := flag.NewFlagSet("gen", flag.ContinueOnError)
+// moduleFlags returns a flagset pre-loaded with the common -m/--module and --modules-dir flags.
+func moduleFlags(name string) (*flag.FlagSet, *string, *string) {
+	flags := flag.NewFlagSet(name, flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
+	moduleName := flags.String("module", "", "module name")
+	flags.StringVar(moduleName, "m", "", "module name")
+	modulesDir := flags.String("modules-dir", "module", "modules directory")
+	return flags, moduleName, modulesDir
+}
 
-	// Defining the flags
+func runGen(args []string, makeMigration makeMigrationFunc) error {
+	flags, moduleName, modulesDir := moduleFlags("gen")
 	overwrite := flags.Bool("overwrite", false, "overwrite latest migration")
 	flags.BoolVar(overwrite, "o", false, "overwrite latest migration")
-
-	moduleName := flags.String("module", "", "module to generate")
-	flags.StringVar(moduleName, "m", "", "module to generate")
-
-	modulesDir := flags.String("modules-dir", "module", "modules directory")
 	dryRun := flags.Bool("dry-run", false, "print what would be generated without writing")
 
-	// Parsing the flags
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -84,22 +83,11 @@ func runGen(args []string, makeMigration makeMigrationFunc) error {
 	}
 	internal.ModulesDir = *modulesDir
 	internal.DryRun = *dryRun
-
-	// Run the migration generation
 	return makeMigration(*overwrite, *moduleName)
 }
 
 func runUp(args []string, migrateUp migrateUpFunc) error {
-	// Getting the flags
-	flags := flag.NewFlagSet("up", flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-
-	// Defining the flags
-	moduleName := flags.String("module", "", "module to migrate")
-	flags.StringVar(moduleName, "m", "", "module to migrate")
-	modulesDir := flags.String("modules-dir", "module", "modules directory")
-
-	// Parsing the flags
+	flags, moduleName, modulesDir := moduleFlags("up")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -107,55 +95,32 @@ func runUp(args []string, migrateUp migrateUpFunc) error {
 		return fmt.Errorf("unexpected argument %q", flags.Arg(0))
 	}
 	internal.ModulesDir = *modulesDir
-
-	// Run the migration up
 	return migrateUp(*moduleName)
 }
 
 func runDown(args []string, migrateDown migrateDownFunc) error {
-	// The down command has a required positional argument for the number of steps,
-	// so we need to handle flag parsing manually
-	stepArg, flagArgs, err := splitDownArgs(args)
-	if err != nil {
-		return err
+	// Contract: wigrate down <steps> [flags]
+	if len(args) == 0 {
+		return fmt.Errorf("down steps is required")
 	}
-	flags := flag.NewFlagSet("down", flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-
-	// Defining the flags
-	moduleName := flags.String("module", "", "module to migrate")
-	flags.StringVar(moduleName, "m", "", "module to migrate")
-	modulesDir := flags.String("modules-dir", "module", "modules directory")
-
-	// Parsing the flags
-	if err := flags.Parse(flagArgs); err != nil {
-		return err
-	}
-
-	steps, err := strconv.Atoi(stepArg)
+	steps, err := strconv.Atoi(args[0])
 	if err != nil {
 		return fmt.Errorf("down steps must be a number")
 	}
 	if steps <= 0 {
 		return fmt.Errorf("down steps must be greater than zero")
 	}
-	internal.ModulesDir = *modulesDir
 
-	// Run the migration down
+	flags, moduleName, modulesDir := moduleFlags("down")
+	if err := flags.Parse(args[1:]); err != nil {
+		return err
+	}
+	internal.ModulesDir = *modulesDir
 	return migrateDown(steps, *moduleName)
 }
 
 func runStatus(args []string, migrateStatus migrateStatusFunc) error {
-	// Getting the flags
-	flags := flag.NewFlagSet("status", flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-
-	// Defining the flags
-	moduleName := flags.String("module", "", "module to show status")
-	flags.StringVar(moduleName, "m", "", "module to show status")
-	modulesDir := flags.String("modules-dir", "module", "modules directory")
-
-	// Parsing the flags
+	flags, moduleName, modulesDir := moduleFlags("status")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -163,48 +128,7 @@ func runStatus(args []string, migrateStatus migrateStatusFunc) error {
 		return fmt.Errorf("unexpected argument %q", flags.Arg(0))
 	}
 	internal.ModulesDir = *modulesDir
-
-	// Run the migration status
 	return migrateStatus(*moduleName)
-}
-
-func splitDownArgs(args []string) (string, []string, error) {
-	// Getting the step count from positional args
-	var stepArg string
-	var flagArgs []string
-	needValue := false
-
-	// Separating positional and flag arguments
-	for _, arg := range args {
-		if needValue {
-			flagArgs = append(flagArgs, arg)
-			needValue = false
-			continue
-		}
-		switch {
-		case arg == "-m" || arg == "--module":
-			flagArgs = append(flagArgs, arg)
-			needValue = true
-		case strings.HasPrefix(arg, "-m=") || strings.HasPrefix(arg, "--module="):
-			flagArgs = append(flagArgs, arg)
-		case strings.HasPrefix(arg, "-"):
-			flagArgs = append(flagArgs, arg)
-		case stepArg == "":
-			stepArg = arg
-		default:
-			return "", nil, fmt.Errorf("unexpected argument %q", arg)
-		}
-	}
-
-	// Validating the split result
-	if needValue {
-		return "", nil, fmt.Errorf("flag needs an argument: -m")
-	}
-	if stepArg == "" {
-		return "", nil, fmt.Errorf("down steps is required")
-	}
-
-	return stepArg, flagArgs, nil
 }
 
 func printUsage() {

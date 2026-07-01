@@ -32,7 +32,7 @@ func diffSchema(previous tableSchema, desired tableSchema) (schemaDiff, error) {
 	previousColumns := columnsByName(previous.columns)
 	desiredColumns := columnsByName(desired.columns)
 
-	// Diff columns: added or changed
+	// Identifying added and changed columns
 	for _, column := range desired.columns {
 		before, ok := previousColumns[column.name]
 		if !ok {
@@ -46,12 +46,12 @@ func diffSchema(previous tableSchema, desired tableSchema) (schemaDiff, error) {
 		if before.primary != column.primary {
 			return schemaDiff{}, fmt.Errorf("primary key change for column %s is not supported in alter migration", column.name)
 		}
-		if !sameColumn(before, column) {
+		if before != column {
 			diff.changedColumns = append(diff.changedColumns, columnChange{before: before, after: column})
 		}
 	}
 
-	// Diff columns: removed
+	// Identifying removed columns
 	for _, column := range previous.columns {
 		if _, ok := desiredColumns[column.name]; ok {
 			continue
@@ -68,14 +68,14 @@ func diffSchema(previous tableSchema, desired tableSchema) (schemaDiff, error) {
 	previousForeignKeys := foreignKeysByColumn(previous.foreignKeys)
 	desiredForeignKeys := foreignKeysByColumn(desired.foreignKeys)
 
-	// Diff foreign keys: added or changed
+	// Identifying added and changed foreign keys
 	for _, foreignKey := range desired.foreignKeys {
 		before, ok := previousForeignKeys[foreignKey.column]
 		if !ok {
 			diff.addedForeignKeys = append(diff.addedForeignKeys, foreignKey)
 			continue
 		}
-		if !sameForeignKey(before, foreignKey) {
+		if before != foreignKey {
 			diff.changedForeignKeys = append(diff.changedForeignKeys, foreignKeyChange{before: before, after: foreignKey})
 		}
 	}
@@ -133,15 +133,6 @@ func (diff schemaDiff) changedColumnNames() []string {
 	return names
 }
 
-func (diff schemaDiff) operationCount() int {
-	return len(diff.addedColumns) +
-		len(diff.removedColumns) +
-		len(diff.changedColumns)*3 +
-		len(diff.addedForeignKeys) +
-		len(diff.removedForeignKeys) +
-		len(diff.changedForeignKeys)*2
-}
-
 func columnsByName(columns []columnSchema) map[string]columnSchema {
 	byName := make(map[string]columnSchema, len(columns))
 	for _, column := range columns {
@@ -160,27 +151,17 @@ func foreignKeysByColumn(foreignKeys []foreignKeySchema) map[string]foreignKeySc
 	return byColumn
 }
 
-func sameColumn(left columnSchema, right columnSchema) bool {
-	return left.name == right.name &&
-		left.dataType == right.dataType &&
-		left.notNull == right.notNull &&
-		left.primary == right.primary &&
-		left.unique == right.unique
-}
-
-func sameForeignKey(left foreignKeySchema, right foreignKeySchema) bool {
-	return left.column == right.column &&
-		left.refTable == right.refTable &&
-		left.refColumn == right.refColumn &&
-		left.onDelete == right.onDelete
-}
-
 func warnColumnRename(removed []columnSchema, added []columnSchema) {
 	for _, r := range removed {
+		warned := false
 		for _, a := range added {
 			if r.dataType == a.dataType {
 				fmt.Fprintf(os.Stderr, "warning: column %q removed and %q added with same type %q — if this is a rename, data will be lost\n", r.name, a.name, r.dataType)
+				warned = true
 			}
+		}
+		if !warned {
+			fmt.Fprintf(os.Stderr, "warning: column %q dropped — data will be lost\n", r.name)
 		}
 	}
 }

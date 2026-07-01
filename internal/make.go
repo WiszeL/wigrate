@@ -10,19 +10,19 @@ import (
 )
 
 func MakeMigration(overwriteLatest bool, moduleNames ...string) error {
-	// Discovering modules
+	// Discovering the modules
 	modules, err := findModules()
 	if err != nil {
 		return err
 	}
 
-	// Filtering by module name
+	// Filtering the modules
 	modules, err = filterModules(modules, moduleNames...)
 	if err != nil {
 		return err
 	}
 
-	// Iterating over target modules
+	// Making migration per module
 	for _, module := range modules {
 		if err := makePerModule(module, overwriteLatest); err != nil {
 			return err
@@ -85,17 +85,25 @@ func makePerModule(module migrationModule, overwriteLatest bool) error {
 		return fmt.Errorf("stat entity dir: %w", err)
 	}
 
+	// Scan migration dir once; pass to each entity to avoid O(E²) repeated ReadDir.
+	migrationEntries, err := os.ReadDir(module.migrationDir)
+	if err != nil {
+		return fmt.Errorf("read migration dir: %w", err)
+	}
+
 	// Reading entity files
-	entries, err := os.ReadDir(module.entityDir)
+	entityEntries, err := os.ReadDir(module.entityDir)
 	if err != nil {
 		return fmt.Errorf("read entity dir: %w", err)
 	}
-	for _, entry := range entries {
+
+	// Generating migration per entity
+	for _, entry := range entityEntries {
 		if !isGoEntityFile(entry.Name()) {
 			continue
 		}
 
-		if err := generateMigrationForEntity(module, entry.Name(), overwriteLatest); err != nil {
+		if err := generateMigrationForEntity(module, migrationEntries, entry.Name(), overwriteLatest); err != nil {
 			return err
 		}
 	}
@@ -103,36 +111,28 @@ func makePerModule(module migrationModule, overwriteLatest bool) error {
 	return nil
 }
 
-func generateMigrationForEntity(module migrationModule, goName string, overwriteLatest bool) error {
+func generateMigrationForEntity(module migrationModule, entries []os.DirEntry, goName string, overwriteLatest bool) error {
 	// Extracting entity name from file
 	// Migrations are named after entity files, without the `.go` suffix.
-	entityName := entityNameFromFile(goName)
+	entityName := strings.TrimSuffix(goName, filepath.Ext(goName))
 	if entityName == "" {
 		return fmt.Errorf("invalid entity file name %s", goName)
 	}
 
-	// Checking existing migration state
-	state, err := findEntityMigrationState(module, entityName)
-	if err != nil {
-		return err
-	}
+	latest := latestMigrationFile(module, entries, entityName)
 
 	// No migration history means this entity needs its init migration.
-	if state.latest == nil {
+	if latest == nil {
 		return makeInitMigration(module, entityName)
 	}
 
 	// Overwrite is always scoped to the latest migration for this entity.
 	if overwriteLatest {
-		return overwriteLatestMigration(module, entityName, *state.latest)
+		return overwriteLatestMigration(module, entries, entityName, *latest)
 	}
 
 	// Existing history plus no overwrite means a new alter migration.
-	return makeAlterMigration(module, entityName)
-}
-
-func runCommand(cmd string, args ...string) error {
-	return runCommandFunc(cmd, args...)
+	return makeAlterMigration(module, entries, entityName)
 }
 
 func isGoEntityFile(name string) bool {
@@ -144,12 +144,11 @@ var runCommandFunc = func(cmd string, args ...string) error {
 		fmt.Printf("[dry-run] %s %s\n", cmd, strings.Join(args, " "))
 		return nil
 	}
+	if _, err := exec.LookPath(cmd); err != nil {
+		return fmt.Errorf("%s not found in PATH — install golang-migrate: https://github.com/golang-migrate/migrate", cmd)
+	}
 	command := exec.Command(cmd, args...)
 	command.Stdout = os.Stdout
 	command.Stderr = os.Stderr
-	if err := command.Run(); err != nil {
-		return err
-	}
-
-	return nil
+	return command.Run()
 }

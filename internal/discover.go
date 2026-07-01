@@ -28,10 +28,6 @@ type migrationFile struct {
 	direction string
 }
 
-type migrationState struct {
-	latest *migrationFile
-}
-
 func findModules() ([]migrationModule, error) {
 	var modules []migrationModule
 
@@ -75,19 +71,17 @@ func findModules() ([]migrationModule, error) {
 	return modules, nil
 }
 
-func entityNameFromFile(goName string) string {
-	return strings.TrimSuffix(goName, filepath.Ext(goName))
-}
-
-func findEntityMigrationState(module migrationModule, entityName string) (migrationState, error) {
+func findEntityMigrationState(module migrationModule, entityName string) (*migrationFile, error) {
 	// Reading migration directory
 	entries, err := os.ReadDir(module.migrationDir)
 	if err != nil {
-		return migrationState{}, fmt.Errorf("read migration dir: %w", err)
+		return nil, fmt.Errorf("read migration dir: %w", err)
 	}
+	return latestMigrationFile(module, entries, entityName), nil
+}
 
-	// Finding latest migration state
-	state := migrationState{}
+func latestMigrationFile(module migrationModule, entries []os.DirEntry, entityName string) *migrationFile {
+	var latest *migrationFile
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
@@ -98,17 +92,16 @@ func findEntityMigrationState(module migrationModule, entityName string) (migrat
 			continue
 		}
 
-		if state.latest == nil || file.baseName > state.latest.baseName {
-			state.latest = file
+		if latest == nil || file.baseName > latest.baseName {
+			latest = file
 			continue
 		}
 
-		if file.baseName == state.latest.baseName && file.direction == "up" {
-			state.latest = file
+		if file.baseName == latest.baseName && file.direction == "up" {
+			latest = file
 		}
 	}
-
-	return state, nil
+	return latest
 }
 
 func parseMigrationFile(path string, entityName string) (*migrationFile, bool) {

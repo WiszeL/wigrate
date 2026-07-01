@@ -14,50 +14,40 @@ func makeInitMigration(module migrationModule, entityName string) error {
 	}
 
 	// Running migrate CLI
-	if err := runCommand("migrate", "create", "-ext", "sql", "-dir", module.migrationDir, "-seq", "init_"+entityName); err != nil {
+	if err := runCommandFunc("migrate", "create", "-ext", "sql", "-dir", module.migrationDir, "-seq", "init_"+entityName); err != nil {
 		return err
 	}
 
 	// Rediscover the file pair instead of depending on migrate CLI output.
-	state, err := findEntityMigrationState(module, entityName)
+	latest, err := findEntityMigrationState(module, entityName)
 	if err != nil {
 		return err
 	}
-	if state.latest == nil || state.latest.kind != migrationKindInit {
+	if latest == nil || latest.kind != migrationKindInit {
 		return fmt.Errorf("created init migration for entity %s not found", entityName)
 	}
 
-	// Writing migration files
-	return writeInitMigrationFiles(schema, *state.latest)
+	return writeMigrationFiles(*latest, buildCreateTableSQL(schema), buildDropTableSQL(schema))
 }
 
-func overwriteLatestMigration(module migrationModule, entityName string, latest migrationFile) error {
+func overwriteLatestMigration(module migrationModule, entries []os.DirEntry, entityName string, latest migrationFile) error {
 	switch latest.kind {
 	case migrationKindInit:
-		return overwriteInitMigration(module, entityName, latest)
+		schema, err := parseEntitySchema(module, entityName)
+		if err != nil {
+			return err
+		}
+		return writeMigrationFiles(latest, buildCreateTableSQL(schema), buildDropTableSQL(schema))
 	case migrationKindAlter:
-		return overwriteAlterMigration(module, entityName, latest)
+		return overwriteAlterMigration(module, entries, entityName, latest)
 	default:
 		return fmt.Errorf("unknown migration kind %s", latest.kind)
 	}
 }
 
-func overwriteInitMigration(module migrationModule, entityName string, latest migrationFile) error {
-	schema, err := parseEntitySchema(module, entityName)
-	if err != nil {
-		return err
-	}
-
-	return writeInitMigrationFiles(schema, latest)
-}
-
-func writeInitMigrationFiles(schema tableSchema, file migrationFile) error {
-	return writeMigrationFiles(file, buildCreateTableSQL(schema), buildDropTableSQL(schema))
-}
-
-func makeAlterMigration(module migrationModule, entityName string) error {
+func makeAlterMigration(module migrationModule, entries []os.DirEntry, entityName string) error {
 	// Alter migrations are generated from the diff between migration history and current entity code.
-	diff, err := buildSchemaDiff(module, entityName, nil)
+	diff, err := buildSchemaDiff(module, entries, entityName, nil)
 	if err != nil {
 		return err
 	}
@@ -71,25 +61,25 @@ func makeAlterMigration(module migrationModule, entityName string) error {
 	// Creating new migration
 	migrationName := alterMigrationName(diff.changedColumnNames(), entityName)
 	fmt.Printf("Create new alter migration for entity %s in module %s.\n", entityName, module.name)
-	if err := runCommand("migrate", "create", "-ext", "sql", "-dir", module.migrationDir, "-seq", migrationName); err != nil {
+	if err := runCommandFunc("migrate", "create", "-ext", "sql", "-dir", module.migrationDir, "-seq", migrationName); err != nil {
 		return err
 	}
 
-	state, err := findEntityMigrationState(module, entityName)
+	// Fresh scan needed: migrate create just wrote new files.
+	latest, err := findEntityMigrationState(module, entityName)
 	if err != nil {
 		return err
 	}
-	if state.latest == nil || state.latest.kind != migrationKindAlter {
+	if latest == nil || latest.kind != migrationKindAlter {
 		return fmt.Errorf("created alter migration for entity %s not found", entityName)
 	}
 
-	// Writing migration files
-	return writeAlterMigrationFiles(diff, *state.latest)
+	return writeMigrationFiles(*latest, buildAlterTableSQL(diff), buildRevertAlterTableSQL(diff))
 }
 
-func overwriteAlterMigration(module migrationModule, entityName string, latest migrationFile) error {
+func overwriteAlterMigration(module migrationModule, entries []os.DirEntry, entityName string, latest migrationFile) error {
 	// Rebuild only the latest alter by replaying migration history before it.
-	diff, err := buildSchemaDiff(module, entityName, &latest)
+	diff, err := buildSchemaDiff(module, entries, entityName, &latest)
 	if err != nil {
 		return err
 	}
@@ -98,16 +88,16 @@ func overwriteAlterMigration(module migrationModule, entityName string, latest m
 		return nil
 	}
 
-	return writeAlterMigrationFiles(diff, latest)
+	return writeMigrationFiles(latest, buildAlterTableSQL(diff), buildRevertAlterTableSQL(diff))
 }
 
-func buildSchemaDiff(module migrationModule, entityName string, before *migrationFile) (schemaDiff, error) {
+func buildSchemaDiff(module migrationModule, entries []os.DirEntry, entityName string, before *migrationFile) (schemaDiff, error) {
 	current, err := parseEntitySchema(module, entityName)
 	if err != nil {
 		return schemaDiff{}, err
 	}
 
-	existing, err := readGeneratedSchema(module, entityName, before)
+	existing, err := readGeneratedSchema(module, entries, entityName, before)
 	if err != nil {
 		return schemaDiff{}, err
 	}
@@ -115,13 +105,10 @@ func buildSchemaDiff(module migrationModule, entityName string, before *migratio
 	return diffSchema(existing, current)
 }
 
-func writeAlterMigrationFiles(diff schemaDiff, file migrationFile) error {
-	return writeMigrationFiles(file, buildAlterTableSQL(diff), buildRevertAlterTableSQL(diff))
-}
-
 func writeMigrationFiles(file migrationFile, upSQL string, downSQL string) error {
 	upPath, downPath := migrationFilePair(file)
-	// Dry run check
+
+	// Checking for dry run
 	if DryRun {
 		fmt.Printf("[dry-run] write %s\n%s\n", upPath, upSQL)
 		fmt.Printf("[dry-run] write %s\n%s\n", downPath, downSQL)
@@ -138,6 +125,7 @@ func writeMigrationFiles(file migrationFile, upSQL string, downSQL string) error
 
 func buildCreateTableSQL(schema tableSchema) string {
 	lines := make([]string, 0, len(schema.columns)+len(schema.foreignKeys))
+
 	// Building columns
 	for _, column := range schema.columns {
 		lines = append(lines, "    "+buildColumnDefinition(column))
@@ -164,7 +152,7 @@ func buildRevertAlterTableSQL(diff schemaDiff) string {
 }
 
 func buildAlterUpLines(diff schemaDiff) []string {
-	lines := make([]string, 0, diff.operationCount())
+	lines := make([]string, 0)
 
 	// Drop constraints before touching dependent columns.
 	for _, foreignKey := range diff.removedForeignKeys {
@@ -173,18 +161,22 @@ func buildAlterUpLines(diff schemaDiff) []string {
 	for _, change := range diff.changedForeignKeys {
 		lines = append(lines, dropForeignKeyLine(diff.tableName, change.before))
 	}
+
 	// Removing columns
 	for _, column := range diff.removedColumns {
 		lines = append(lines, dropColumnLine(column))
 	}
+
 	// Column changes stay between removals and additions for predictable diffs.
 	for _, change := range diff.changedColumns {
 		lines = append(lines, buildAlterColumnChangeLines(diff.tableName, change.before, change.after)...)
 	}
+
 	// Adding columns
 	for _, column := range diff.addedColumns {
 		lines = append(lines, addColumnLine(column))
 	}
+
 	// Add constraints after their columns are guaranteed to exist.
 	for _, foreignKey := range diff.addedForeignKeys {
 		lines = append(lines, addForeignKeyLine(diff.tableName, foreignKey))
@@ -197,7 +189,7 @@ func buildAlterUpLines(diff schemaDiff) []string {
 }
 
 func buildAlterDownLines(diff schemaDiff) []string {
-	lines := make([]string, 0, diff.operationCount())
+	lines := make([]string, 0)
 
 	// Down migrations reverse up operations in dependency-safe order.
 
@@ -208,6 +200,7 @@ func buildAlterDownLines(diff schemaDiff) []string {
 	for i := len(diff.addedForeignKeys) - 1; i >= 0; i-- {
 		lines = append(lines, dropForeignKeyLine(diff.tableName, diff.addedForeignKeys[i]))
 	}
+
 	// Removing added columns
 	for i := len(diff.addedColumns) - 1; i >= 0; i-- {
 		lines = append(lines, dropColumnLine(diff.addedColumns[i]))
@@ -241,7 +234,7 @@ func buildAlterColumnChangeLines(tableName string, before columnSchema, after co
 
 	// Changing type
 	if before.dataType != after.dataType {
-		lines = append(lines, buildAlterColumnTypeLine(after.name, after.dataType))
+		lines = append(lines, fmt.Sprintf("    ALTER COLUMN %s TYPE %s", after.name, after.dataType))
 	}
 
 	// Changing nullability
@@ -268,7 +261,7 @@ func addForeignKeyLine(tableName string, foreignKey foreignKeySchema) string {
 }
 
 func dropForeignKeyLine(tableName string, foreignKey foreignKeySchema) string {
-	return "    DROP CONSTRAINT IF EXISTS " + foreignKeyConstraintName(tableName, foreignKey.refTable)
+	return "    DROP CONSTRAINT IF EXISTS " + foreignKeyConstraintName(tableName, foreignKey.column)
 }
 
 func addUniqueLine(tableName string, column columnSchema) string {
@@ -294,21 +287,15 @@ func buildColumnDefinition(column columnSchema) string {
 }
 
 func buildCreateForeignKeyDefinition(tableName string, foreignKey foreignKeySchema) string {
-	return "CONSTRAINT " + foreignKeyConstraintName(tableName, foreignKey.refTable) +
+	return "CONSTRAINT " + foreignKeyConstraintName(tableName, foreignKey.column) +
 		" FOREIGN KEY (" + foreignKey.column + ") REFERENCES " +
 		foreignKey.refTable + "(" + foreignKey.refColumn + ")" +
-		onDeleteClause(foreignKey.onDelete)
-}
-
-func onDeleteClause(onDelete string) string {
-	if onDelete != "" {
-		return " ON DELETE " + onDelete
-	}
-	return ""
-}
-
-func buildAlterColumnTypeLine(columnName string, dataType string) string {
-	return fmt.Sprintf("    ALTER COLUMN %s TYPE %s", columnName, dataType)
+		func() string {
+			if foreignKey.onDelete != "" {
+				return " ON DELETE " + foreignKey.onDelete
+			}
+			return ""
+		}()
 }
 
 func buildAlterColumnNullLine(before columnSchema, after columnSchema) []string {
@@ -336,8 +323,8 @@ func alterMigrationName(columns []string, entityName string) string {
 	return strings.Join(parts, "_")
 }
 
-func foreignKeyConstraintName(tableName string, refTable string) string {
-	return "fk_" + tableName + "_" + refTable
+func foreignKeyConstraintName(tableName string, column string) string {
+	return "fk_" + tableName + "_" + column
 }
 
 func buildUniqueConstraintDefinition(tableName string, columnName string) string {

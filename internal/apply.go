@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -80,7 +79,7 @@ func runMigrateCommand(module migrationModule, config databaseConfig, direction 
 	}
 
 	// Executing the migrate command
-	if err := runCommand("migrate", args...); err != nil {
+	if err := runCommandFunc("migrate", args...); err != nil {
 		if isNoChangeError(err) {
 			return nil
 		}
@@ -117,11 +116,5 @@ func hasMigrationFiles(module migrationModule) (bool, error) {
 }
 
 func isNoChangeError(err error) bool {
-	// Checking via exit code
-	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
-		return exitErr.ExitCode() == 0
-	}
-
-	// Falling back to string matching
 	return strings.Contains(strings.ToLower(err.Error()), "no change")
 }

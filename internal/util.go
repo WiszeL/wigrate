@@ -7,10 +7,19 @@ import (
 )
 
 func FindRoot() (string, error) {
-	// Try to find with `go.mod` first
 	if wd, err := os.Getwd(); err == nil {
-		if root, ok := findParentWithAnchor(wd, "go.mod"); ok {
-			return root, nil
+		dir, err := filepath.Abs(wd)
+		if err == nil {
+			for {
+				if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+					return dir, nil
+				}
+				parent := filepath.Dir(dir)
+				if parent == dir {
+					break
+				}
+				dir = parent
+			}
 		}
 	}
 
@@ -19,26 +28,5 @@ func FindRoot() (string, error) {
 		return filepath.Dir(executable), nil
 	}
 
-	// Root not found
 	return "", errors.New("root not found")
-}
-
-func findParentWithAnchor(start string, anchor string) (string, bool) {
-	dir, err := filepath.Abs(start)
-	if err != nil {
-		return "", false
-	}
-
-	for {
-		if _, err := os.Stat(filepath.Join(dir, anchor)); err == nil {
-			return dir, true
-		}
-
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", false
-		}
-
-		dir = parent
-	}
 }

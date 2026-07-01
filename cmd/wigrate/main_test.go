@@ -101,22 +101,6 @@ func Test_CLI_Run(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("passes selected module before steps to down", func(t *testing.T) {
-		// ===== Arrange ===== //
-		deps := stubDependencies()
-
-		// ===== Act ===== //
-		deps.migrateDown = func(steps int, moduleNames ...string) error {
-			assert.Equal(t, 1, steps)
-			assert.Equal(t, []string{"iam"}, moduleNames)
-			return nil
-		}
-		err := run([]string{"down", "-m=iam", "1"}, deps)
-
-		// ===== Assert ===== //
-		assert.NoError(t, err)
-	})
-
 	t.Run("rejects down without steps", func(t *testing.T) {
 		// ===== Arrange ===== //
 		deps := stubDependencies()

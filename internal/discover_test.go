@@ -3,6 +3,7 @@ package internal
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -106,28 +107,20 @@ func Test_Discover_FindModules(t *testing.T) {
 }
 
 func Test_Discover_EntityNameFromFile(t *testing.T) {
+	entityNameFromFile := func(goName string) string {
+		return strings.TrimSuffix(goName, filepath.Ext(goName))
+	}
+
 	t.Run("trims .go extension", func(t *testing.T) {
-		// ===== Arrange ===== //
-		// ===== Act ===== //
-		result := entityNameFromFile("user.go")
-		// ===== Assert ===== //
-		assert.Equal(t, "user", result)
+		assert.Equal(t, "user", entityNameFromFile("user.go"))
 	})
 
 	t.Run("trims .go extension with multiple dots", func(t *testing.T) {
-		// ===== Arrange ===== //
-		// ===== Act ===== //
-		result := entityNameFromFile("test.data.go")
-		// ===== Assert ===== //
-		assert.Equal(t, "test.data", result)
+		assert.Equal(t, "test.data", entityNameFromFile("test.data.go"))
 	})
 
 	t.Run("returns empty for no extension", func(t *testing.T) {
-		// ===== Arrange ===== //
-		// ===== Act ===== //
-		result := entityNameFromFile("user")
-		// ===== Assert ===== //
-		assert.Equal(t, "user", result)
+		assert.Equal(t, "user", entityNameFromFile("user"))
 	})
 }
 
@@ -144,8 +137,8 @@ func Test_Discover_FindEntityMigrationState(t *testing.T) {
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)
-		assert.NotNil(t, state.latest)
-		assert.Equal(t, migrationKindInit, state.latest.kind)
+		assert.NotNil(t, state)
+		assert.Equal(t, migrationKindInit, state.kind)
 	})
 
 	t.Run("finds latest migration from init+alter", func(t *testing.T) {
@@ -160,9 +153,9 @@ func Test_Discover_FindEntityMigrationState(t *testing.T) {
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)
-		assert.NotNil(t, state.latest)
-		assert.Equal(t, "000002_alter_email_user", state.latest.baseName)
-		assert.Equal(t, migrationKindAlter, state.latest.kind)
+		assert.NotNil(t, state)
+		assert.Equal(t, "000002_alter_email_user", state.baseName)
+		assert.Equal(t, migrationKindAlter, state.kind)
 	})
 
 	t.Run("prefers up file over down when same base", func(t *testing.T) {
@@ -177,8 +170,8 @@ func Test_Discover_FindEntityMigrationState(t *testing.T) {
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)
-		assert.NotNil(t, state.latest)
-		assert.Equal(t, "up", state.latest.direction)
+		assert.NotNil(t, state)
+		assert.Equal(t, "up", state.direction)
 	})
 
 	t.Run("returns empty state when no migrations exist", func(t *testing.T) {
@@ -191,7 +184,7 @@ func Test_Discover_FindEntityMigrationState(t *testing.T) {
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)
-		assert.Nil(t, state.latest)
+		assert.Nil(t, state)
 	})
 
 	t.Run("ignores files for other entities", func(t *testing.T) {
@@ -205,7 +198,7 @@ func Test_Discover_FindEntityMigrationState(t *testing.T) {
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)
-		assert.Nil(t, state.latest)
+		assert.Nil(t, state)
 	})
 }
 

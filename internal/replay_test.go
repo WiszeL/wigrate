@@ -6,11 +6,12 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestReplayColumn(t *testing.T) {
 	t.Run("Parse", func(t *testing.T) {
-		// Arrange
+		// ===== Arrange ===== //
 		tests := []struct {
 			in   string
 			want columnSchema
@@ -26,10 +27,10 @@ func TestReplayColumn(t *testing.T) {
 		}
 
 		for _, tt := range tests {
-			// Act
+			// ===== Act ===== //
 			got, ok := parseGeneratedColumn(tt.in)
 
-			// Assert
+			// ===== Assert ===== //
 			assert.Equal(t, tt.ok, ok)
 			if ok {
 				assert.Equal(t, tt.want, got)
@@ -40,7 +41,7 @@ func TestReplayColumn(t *testing.T) {
 
 func TestReplayFK(t *testing.T) {
 	t.Run("parseFK", func(t *testing.T) {
-		// Arrange
+		// ===== Arrange ===== //
 		tests := []struct {
 			in   string
 			want foreignKeySchema
@@ -52,10 +53,10 @@ func TestReplayFK(t *testing.T) {
 		}
 
 		for _, tt := range tests {
-			// Act
+			// ===== Act ===== //
 			got, ok := parseGeneratedForeignKey(tt.in)
 
-			// Assert
+			// ===== Assert ===== //
 			assert.Equal(t, tt.ok, ok)
 			if ok {
 				assert.Equal(t, tt.want, got)
@@ -64,7 +65,7 @@ func TestReplayFK(t *testing.T) {
 	})
 
 	t.Run("parseAlterFK", func(t *testing.T) {
-		// Arrange
+		// ===== Arrange ===== //
 		tests := []struct {
 			in   string
 			want foreignKeySchema
@@ -75,10 +76,10 @@ func TestReplayFK(t *testing.T) {
 		}
 
 		for _, tt := range tests {
-			// Act
+			// ===== Act ===== //
 			got, ok := parseGeneratedAlterForeignKey(tt.in)
 
-			// Assert
+			// ===== Assert ===== //
 			assert.Equal(t, tt.ok, ok)
 			if ok {
 				assert.Equal(t, tt.want, got)
@@ -89,7 +90,7 @@ func TestReplayFK(t *testing.T) {
 
 func TestReplayUniqueConstraint(t *testing.T) {
 	t.Run("parse", func(t *testing.T) {
-		// Arrange
+		// ===== Arrange ===== //
 		tests := []struct {
 			in  string
 			col string
@@ -101,10 +102,10 @@ func TestReplayUniqueConstraint(t *testing.T) {
 		}
 
 		for _, tt := range tests {
-			// Act
+			// ===== Act ===== //
 			got, ok := parseGeneratedUniqueConstraint(tt.in)
 
-			// Assert
+			// ===== Assert ===== //
 			assert.Equal(t, tt.ok, ok)
 			if ok {
 				assert.Equal(t, tt.col, got)
@@ -115,7 +116,7 @@ func TestReplayUniqueConstraint(t *testing.T) {
 
 func TestReplayColumnAlter(t *testing.T) {
 	t.Run("apply", func(t *testing.T) {
-		// Arrange
+		// ===== Arrange ===== //
 		type tc struct {
 			name   string
 			schema *tableSchema
@@ -123,17 +124,37 @@ func TestReplayColumnAlter(t *testing.T) {
 			check  func(t *testing.T, s *tableSchema)
 		}
 		tests := []tc{
-			{"type change", &tableSchema{name: "t", columns: []columnSchema{{name: "e", dataType: "TEXT", notNull: true}}}, "e TYPE VARCHAR(20)", func(t *testing.T, s *tableSchema) { assert.Equal(t, "VARCHAR(20)", s.columns[0].dataType) }},
-			{"set not null", &tableSchema{name: "t", columns: []columnSchema{{name: "a", dataType: "INTEGER"}}}, "a SET NOT NULL", func(t *testing.T, s *tableSchema) { assert.True(t, s.columns[0].notNull) }},
-			{"drop not null", &tableSchema{name: "t", columns: []columnSchema{{name: "a", dataType: "INTEGER", notNull: true}}}, "a DROP NOT NULL", func(t *testing.T, s *tableSchema) { assert.False(t, s.columns[0].notNull) }},
-			{"no-op unknown column", &tableSchema{name: "t", columns: []columnSchema{{name: "e", dataType: "TEXT"}}}, "nonexist TYPE VARCHAR(20)", func(t *testing.T, s *tableSchema) { assert.Equal(t, "TEXT", s.columns[0].dataType) }},
+			{
+				name:   "type change",
+				schema: &tableSchema{name: "t", columns: []columnSchema{{name: "e", dataType: "TEXT", notNull: true}}},
+				sql:    "e TYPE VARCHAR(20)",
+				check:  func(t *testing.T, s *tableSchema) { assert.Equal(t, "VARCHAR(20)", s.columns[0].dataType) },
+			},
+			{
+				name:   "set not null",
+				schema: &tableSchema{name: "t", columns: []columnSchema{{name: "a", dataType: "INTEGER"}}},
+				sql:    "a SET NOT NULL",
+				check:  func(t *testing.T, s *tableSchema) { assert.True(t, s.columns[0].notNull) },
+			},
+			{
+				name:   "drop not null",
+				schema: &tableSchema{name: "t", columns: []columnSchema{{name: "a", dataType: "INTEGER", notNull: true}}},
+				sql:    "a DROP NOT NULL",
+				check:  func(t *testing.T, s *tableSchema) { assert.False(t, s.columns[0].notNull) },
+			},
+			{
+				name:   "no-op unknown column",
+				schema: &tableSchema{name: "t", columns: []columnSchema{{name: "e", dataType: "TEXT"}}},
+				sql:    "nonexist TYPE VARCHAR(20)",
+				check:  func(t *testing.T, s *tableSchema) { assert.Equal(t, "TEXT", s.columns[0].dataType) },
+			},
 		}
 
 		for _, tt := range tests {
-			// Act
+			// ===== Act ===== //
 			applyGeneratedColumnAlter(tt.schema, tt.sql)
 
-			// Assert
+			// ===== Assert ===== //
 			tt.check(t, tt.schema)
 		}
 	})
@@ -141,7 +162,7 @@ func TestReplayColumnAlter(t *testing.T) {
 
 func TestReplayLineSkip(t *testing.T) {
 	t.Run("shouldSkip", func(t *testing.T) {
-		// Arrange
+		// ===== Arrange ===== //
 		tests := []struct {
 			in   string
 			skip bool
@@ -155,41 +176,41 @@ func TestReplayLineSkip(t *testing.T) {
 		}
 
 		for _, tt := range tests {
-			// Act
+			// ===== Act ===== //
 			got := shouldSkipGeneratedSQLLine(tt.in)
 
-			// Assert
+			// ===== Assert ===== //
 			assert.Equal(t, tt.skip, got)
 		}
 	})
 
 	t.Run("clean", func(t *testing.T) {
-		// Arrange
+		// ===== Arrange ===== //
 		dirty := "  id UUID NOT NULL,"
 
-		// Act
+		// ===== Act ===== //
 		cleaned := cleanGeneratedSQLLine(dirty)
 
-		// Assert
+		// ===== Assert ===== //
 		assert.Equal(t, "id UUID NOT NULL", cleaned)
 	})
 }
 
 func TestReplayApplySQL(t *testing.T) {
 	t.Run("createTable", func(t *testing.T) {
-		// Arrange
+		// ===== Arrange ===== //
 		s := &tableSchema{name: "users"}
 
-		// Act
+		// ===== Act ===== //
 		applyGeneratedSQL(s, `CREATE TABLE users (
 				id UUID PRIMARY KEY,
 				email VARCHAR(20) NOT NULL UNIQUE,
 				user_id UUID NOT NULL,
-				FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+				CONSTRAINT fk_users_user_id FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 		);
 		`)
 
-		// Assert
+		// ===== Assert ===== //
 		assert.Len(t, s.columns, 3)
 		assert.Equal(t, columnSchema{name: "id", dataType: "UUID", primary: true}, s.columns[0])
 		assert.Equal(t, columnSchema{name: "email", dataType: "VARCHAR(20)", notNull: true, unique: true}, s.columns[1])
@@ -199,7 +220,7 @@ func TestReplayApplySQL(t *testing.T) {
 	})
 
 	t.Run("alterTable", func(t *testing.T) {
-		// Arrange
+		// ===== Arrange ===== //
 		type tc struct {
 			name  string
 			setup func() *tableSchema
@@ -207,36 +228,85 @@ func TestReplayApplySQL(t *testing.T) {
 			check func(t *testing.T, s *tableSchema)
 		}
 		tests := []tc{
-			{"add column", func() *tableSchema { return &tableSchema{name: "users", columns: []columnSchema{{name: "id"}}} }, "ALTER TABLE users\n    ADD COLUMN email VARCHAR(20) NOT NULL;\n", func(t *testing.T, s *tableSchema) { assert.Len(t, s.columns, 2) }},
-			{"drop column + FK cleanup", func() *tableSchema {
-				return &tableSchema{name: "users", columns: []columnSchema{{name: "id"}, {name: "r"}}, foreignKeys: []foreignKeySchema{{column: "r"}}}
-			}, "ALTER TABLE users\n    DROP COLUMN IF EXISTS r;\n", func(t *testing.T, s *tableSchema) { assert.Len(t, s.columns, 1); assert.Empty(t, s.foreignKeys) }},
-			{"alter column type", func() *tableSchema {
-				return &tableSchema{name: "users", columns: []columnSchema{{name: "e", dataType: "TEXT"}}}
-			}, "ALTER TABLE users\n    ALTER COLUMN e TYPE VARCHAR(20);\n", func(t *testing.T, s *tableSchema) { assert.Equal(t, "VARCHAR(20)", s.columns[0].dataType) }},
-			{"set not null", func() *tableSchema { return &tableSchema{name: "users", columns: []columnSchema{{name: "e"}}} }, "ALTER TABLE users\n    ALTER COLUMN e SET NOT NULL;\n", func(t *testing.T, s *tableSchema) { assert.True(t, s.columns[0].notNull) }},
-			{"add unique", func() *tableSchema { return &tableSchema{name: "users", columns: []columnSchema{{name: "e"}}} }, "ALTER TABLE users\n    ADD CONSTRAINT uq_users_e UNIQUE (e);\n", func(t *testing.T, s *tableSchema) { assert.True(t, s.columns[0].unique) }},
-			{"drop unique", func() *tableSchema {
-				return &tableSchema{name: "users", columns: []columnSchema{{name: "e", unique: true}}}
-			}, "ALTER TABLE users\n    DROP CONSTRAINT IF EXISTS uq_users_e;\n", func(t *testing.T, s *tableSchema) { assert.False(t, s.columns[0].unique) }},
-			{"add FK", func() *tableSchema { return &tableSchema{name: "users", columns: []columnSchema{{name: "rid"}}} }, "ALTER TABLE users\n    ADD CONSTRAINT fk_users_roles FOREIGN KEY (rid) REFERENCES roles(id) ON DELETE CASCADE;\n", func(t *testing.T, s *tableSchema) {
-				assert.Len(t, s.foreignKeys, 1)
-				assert.Equal(t, "CASCADE", s.foreignKeys[0].onDelete)
-			}},
-			{"drop FK", func() *tableSchema {
-				return &tableSchema{name: "users", foreignKeys: []foreignKeySchema{{column: "rid", refTable: "roles"}}}
-			}, "ALTER TABLE users\n    DROP CONSTRAINT IF EXISTS fk_users_roles;\n", func(t *testing.T, s *tableSchema) { assert.Empty(t, s.foreignKeys) }},
-			{"unrecognized line", func() *tableSchema { return &tableSchema{name: "users", columns: []columnSchema{{name: "id"}}} }, "ALTER TABLE users\n    BOGUS;\n", func(t *testing.T, s *tableSchema) { assert.Len(t, s.columns, 1) }},
+			{
+				name:  "add column",
+				setup: func() *tableSchema { return &tableSchema{name: "users", columns: []columnSchema{{name: "id"}}} },
+				sql:   "ALTER TABLE users\n    ADD COLUMN email VARCHAR(20) NOT NULL;\n",
+				check: func(t *testing.T, s *tableSchema) { assert.Len(t, s.columns, 2) },
+			},
+			{
+				name: "drop column + FK cleanup",
+				setup: func() *tableSchema {
+					return &tableSchema{
+						name:        "users",
+						columns:     []columnSchema{{name: "id"}, {name: "r"}},
+						foreignKeys: []foreignKeySchema{{column: "r"}},
+					}
+				},
+				sql:   "ALTER TABLE users\n    DROP COLUMN IF EXISTS r;\n",
+				check: func(t *testing.T, s *tableSchema) { assert.Len(t, s.columns, 1); assert.Empty(t, s.foreignKeys) },
+			},
+			{
+				name: "alter column type",
+				setup: func() *tableSchema {
+					return &tableSchema{name: "users", columns: []columnSchema{{name: "e", dataType: "TEXT"}}}
+				},
+				sql:   "ALTER TABLE users\n    ALTER COLUMN e TYPE VARCHAR(20);\n",
+				check: func(t *testing.T, s *tableSchema) { assert.Equal(t, "VARCHAR(20)", s.columns[0].dataType) },
+			},
+			{
+				name:  "set not null",
+				setup: func() *tableSchema { return &tableSchema{name: "users", columns: []columnSchema{{name: "e"}}} },
+				sql:   "ALTER TABLE users\n    ALTER COLUMN e SET NOT NULL;\n",
+				check: func(t *testing.T, s *tableSchema) { assert.True(t, s.columns[0].notNull) },
+			},
+			{
+				name:  "add unique",
+				setup: func() *tableSchema { return &tableSchema{name: "users", columns: []columnSchema{{name: "e"}}} },
+				sql:   "ALTER TABLE users\n    ADD CONSTRAINT uq_users_e UNIQUE (e);\n",
+				check: func(t *testing.T, s *tableSchema) { assert.True(t, s.columns[0].unique) },
+			},
+			{
+				name: "drop unique",
+				setup: func() *tableSchema {
+					return &tableSchema{name: "users", columns: []columnSchema{{name: "e", unique: true}}}
+				},
+				sql:   "ALTER TABLE users\n    DROP CONSTRAINT IF EXISTS uq_users_e;\n",
+				check: func(t *testing.T, s *tableSchema) { assert.False(t, s.columns[0].unique) },
+			},
+			{
+				name:  "add FK",
+				setup: func() *tableSchema { return &tableSchema{name: "users", columns: []columnSchema{{name: "rid"}}} },
+				sql:   "ALTER TABLE users\n    ADD CONSTRAINT fk_users_rid FOREIGN KEY (rid) REFERENCES roles(id) ON DELETE CASCADE;\n",
+				check: func(t *testing.T, s *tableSchema) {
+					assert.Len(t, s.foreignKeys, 1)
+					assert.Equal(t, "CASCADE", s.foreignKeys[0].onDelete)
+				},
+			},
+			{
+				name: "drop FK",
+				setup: func() *tableSchema {
+					return &tableSchema{name: "users", foreignKeys: []foreignKeySchema{{column: "rid", refTable: "roles"}}}
+				},
+				sql:   "ALTER TABLE users\n    DROP CONSTRAINT IF EXISTS fk_users_rid;\n",
+				check: func(t *testing.T, s *tableSchema) { assert.Empty(t, s.foreignKeys) },
+			},
+			{
+				name:  "unrecognized line",
+				setup: func() *tableSchema { return &tableSchema{name: "users", columns: []columnSchema{{name: "id"}}} },
+				sql:   "ALTER TABLE users\n    BOGUS;\n",
+				check: func(t *testing.T, s *tableSchema) { assert.Len(t, s.columns, 1) },
+			},
 		}
 
 		for _, tt := range tests {
-			// Arrange
+			// ===== Arrange ===== //
 			s := tt.setup()
 
-			// Act
+			// ===== Act ===== //
 			applyGeneratedSQL(s, tt.sql)
 
-			// Assert
+			// ===== Assert ===== //
 			tt.check(t, s)
 		}
 	})
@@ -244,33 +314,41 @@ func TestReplayApplySQL(t *testing.T) {
 
 func TestReplayFindFiles(t *testing.T) {
 	t.Run("cases", func(t *testing.T) {
-		// Arrange
+		// ===== Arrange ===== //
 		tests := []struct {
 			setup func(t *testing.T) string
 			count int
 		}{
-			{func(t *testing.T) string {
-				dir := t.TempDir()
-				assert.NoError(t, os.WriteFile(filepath.Join(dir, "000001_init_u.up.sql"), []byte(""), 0644))
-				assert.NoError(t, os.WriteFile(filepath.Join(dir, "000001_init_u.down.sql"), []byte(""), 0644))
-				return dir
-			}, 2},
-			{func(t *testing.T) string {
-				dir := t.TempDir()
-				assert.NoError(t, os.WriteFile(filepath.Join(dir, "random.txt"), []byte(""), 0644))
-				return dir
-			}, 0},
+			{
+				setup: func(t *testing.T) string {
+					dir := t.TempDir()
+					assert.NoError(t, os.WriteFile(filepath.Join(dir, "000001_init_u.up.sql"), []byte(""), 0644))
+					assert.NoError(t, os.WriteFile(filepath.Join(dir, "000001_init_u.down.sql"), []byte(""), 0644))
+					return dir
+				},
+				count: 2,
+			},
+			{
+				setup: func(t *testing.T) string {
+					dir := t.TempDir()
+					assert.NoError(t, os.WriteFile(filepath.Join(dir, "random.txt"), []byte(""), 0644))
+					return dir
+				},
+				count: 0,
+			},
 		}
 
 		for _, tt := range tests {
-			// Arrange
+			// ===== Arrange ===== //
 			dir := tt.setup(t)
 
-			// Act
-			files, err := findEntityMigrationFiles(migrationModule{migrationDir: dir}, "u")
+			// ===== Act ===== //
+			module := migrationModule{migrationDir: dir}
+			entries, err := os.ReadDir(module.migrationDir)
+			require.NoError(t, err)
+			files := findEntityMigrationFiles(module, entries, "u")
 
-			// Assert
-			assert.NoError(t, err)
+			// ===== Assert ===== //
 			assert.Len(t, files, tt.count)
 		}
 	})
@@ -278,7 +356,7 @@ func TestReplayFindFiles(t *testing.T) {
 
 func TestReplayReadSchema(t *testing.T) {
 	t.Run("cases", func(t *testing.T) {
-		// Arrange
+		// ===== Arrange ===== //
 		type tc struct {
 			name     string
 			before   *migrationFile
@@ -286,35 +364,58 @@ func TestReplayReadSchema(t *testing.T) {
 			setup    func(t *testing.T) string
 		}
 		tests := []tc{
-			{"no history", nil, 0, func(t *testing.T) string { return t.TempDir() }},
-			{"init migration", nil, 1, func(t *testing.T) string {
-				dir := t.TempDir()
-				assert.NoError(t, os.WriteFile(filepath.Join(dir, "000001_init_user.up.sql"), []byte("CREATE TABLE users (\n    id UUID PRIMARY KEY\n);\n"), 0644))
-				assert.NoError(t, os.WriteFile(filepath.Join(dir, "000001_init_user.down.sql"), []byte(""), 0644))
-				return dir
-			}},
-			{"init + alter", nil, 2, func(t *testing.T) string {
-				dir := t.TempDir()
-				assert.NoError(t, os.WriteFile(filepath.Join(dir, "000001_init_user.up.sql"), []byte("CREATE TABLE users (\n    id UUID PRIMARY KEY\n);\n"), 0644))
-				assert.NoError(t, os.WriteFile(filepath.Join(dir, "000002_alter_name_user.up.sql"), []byte("ALTER TABLE users\n    ADD COLUMN name VARCHAR(50) NOT NULL;\n"), 0644))
-				return dir
-			}},
-			{"stops before marker", &migrationFile{baseName: "000002_alter_name_user", direction: "up"}, 1, func(t *testing.T) string {
-				dir := t.TempDir()
-				assert.NoError(t, os.WriteFile(filepath.Join(dir, "000001_init_user.up.sql"), []byte("CREATE TABLE users (\n    id UUID PRIMARY KEY\n);\n"), 0644))
-				assert.NoError(t, os.WriteFile(filepath.Join(dir, "000002_alter_name_user.up.sql"), []byte("ALTER TABLE users\n    ADD COLUMN name VARCHAR(50) NOT NULL;\n"), 0644))
-				return dir
-			}},
+			{
+				name:     "no history",
+				before:   nil,
+				colCount: 0,
+				setup:    func(t *testing.T) string { return t.TempDir() },
+			},
+			{
+				name:     "init migration",
+				before:   nil,
+				colCount: 1,
+				setup: func(t *testing.T) string {
+					dir := t.TempDir()
+					assert.NoError(t, os.WriteFile(filepath.Join(dir, "000001_init_user.up.sql"), []byte("CREATE TABLE users (\n    id UUID PRIMARY KEY\n);\n"), 0644))
+					assert.NoError(t, os.WriteFile(filepath.Join(dir, "000001_init_user.down.sql"), []byte(""), 0644))
+					return dir
+				},
+			},
+			{
+				name:     "init + alter",
+				before:   nil,
+				colCount: 2,
+				setup: func(t *testing.T) string {
+					dir := t.TempDir()
+					assert.NoError(t, os.WriteFile(filepath.Join(dir, "000001_init_user.up.sql"), []byte("CREATE TABLE users (\n    id UUID PRIMARY KEY\n);\n"), 0644))
+					assert.NoError(t, os.WriteFile(filepath.Join(dir, "000002_alter_name_user.up.sql"), []byte("ALTER TABLE users\n    ADD COLUMN name VARCHAR(50) NOT NULL;\n"), 0644))
+					return dir
+				},
+			},
+			{
+				name:     "stops before marker",
+				before:   &migrationFile{baseName: "000002_alter_name_user", direction: "up"},
+				colCount: 1,
+				setup: func(t *testing.T) string {
+					dir := t.TempDir()
+					assert.NoError(t, os.WriteFile(filepath.Join(dir, "000001_init_user.up.sql"), []byte("CREATE TABLE users (\n    id UUID PRIMARY KEY\n);\n"), 0644))
+					assert.NoError(t, os.WriteFile(filepath.Join(dir, "000002_alter_name_user.up.sql"), []byte("ALTER TABLE users\n    ADD COLUMN name VARCHAR(50) NOT NULL;\n"), 0644))
+					return dir
+				},
+			},
 		}
 
 		for _, tt := range tests {
-			// Arrange
+			// ===== Arrange ===== //
 			dir := tt.setup(t)
 
-			// Act
-			s, err := readGeneratedSchema(migrationModule{migrationDir: dir}, "user", tt.before)
+			// ===== Act ===== //
+			module := migrationModule{migrationDir: dir}
+			entries, err := os.ReadDir(module.migrationDir)
+			require.NoError(t, err)
+			s, err := readGeneratedSchema(module, entries, "user", tt.before)
 
-			// Assert
+			// ===== Assert ===== //
 			assert.NoError(t, err)
 			assert.Len(t, s.columns, tt.colCount)
 		}
@@ -323,126 +424,202 @@ func TestReplayReadSchema(t *testing.T) {
 
 func TestReplayHelpers(t *testing.T) {
 	t.Run("columns", func(t *testing.T) {
-		// Arrange
+		// ===== Arrange ===== //
 		type tc struct {
 			setup  func() *tableSchema
 			action func(*tableSchema)
 			check  func(t *testing.T, s *tableSchema)
 		}
 		tests := []tc{
-			{func() *tableSchema { return &tableSchema{name: "t"} }, func(s *tableSchema) { appendColumnIfMissing(s, columnSchema{name: "e"}) }, func(t *testing.T, s *tableSchema) { assert.Len(t, s.columns, 1) }},
-			{func() *tableSchema { return &tableSchema{name: "t", columns: []columnSchema{{name: "e"}}} }, func(s *tableSchema) { appendColumnIfMissing(s, columnSchema{name: "e"}) }, func(t *testing.T, s *tableSchema) { assert.Len(t, s.columns, 1) }},
-			{func() *tableSchema {
-				return &tableSchema{name: "t", columns: []columnSchema{{name: "id"}, {name: "rid"}}, foreignKeys: []foreignKeySchema{{column: "rid"}}}
-			}, func(s *tableSchema) { removeColumn(s, "rid") }, func(t *testing.T, s *tableSchema) { assert.Len(t, s.columns, 1); assert.Empty(t, s.foreignKeys) }},
-			{func() *tableSchema { return &tableSchema{name: "t", columns: []columnSchema{{name: "id"}}} }, func(s *tableSchema) { removeColumn(s, "nonexist") }, func(t *testing.T, s *tableSchema) { assert.Len(t, s.columns, 1) }},
+			{
+				setup:  func() *tableSchema { return &tableSchema{name: "t"} },
+				action: func(s *tableSchema) { appendColumnIfMissing(s, columnSchema{name: "e"}) },
+				check:  func(t *testing.T, s *tableSchema) { assert.Len(t, s.columns, 1) },
+			},
+			{
+				setup:  func() *tableSchema { return &tableSchema{name: "t", columns: []columnSchema{{name: "e"}}} },
+				action: func(s *tableSchema) { appendColumnIfMissing(s, columnSchema{name: "e"}) },
+				check:  func(t *testing.T, s *tableSchema) { assert.Len(t, s.columns, 1) },
+			},
+			{
+				setup: func() *tableSchema {
+					return &tableSchema{
+						name:        "t",
+						columns:     []columnSchema{{name: "id"}, {name: "rid"}},
+						foreignKeys: []foreignKeySchema{{column: "rid"}},
+					}
+				},
+				action: func(s *tableSchema) { removeColumn(s, "rid") },
+				check:  func(t *testing.T, s *tableSchema) { assert.Len(t, s.columns, 1); assert.Empty(t, s.foreignKeys) },
+			},
+			{
+				setup:  func() *tableSchema { return &tableSchema{name: "t", columns: []columnSchema{{name: "id"}}} },
+				action: func(s *tableSchema) { removeColumn(s, "nonexist") },
+				check:  func(t *testing.T, s *tableSchema) { assert.Len(t, s.columns, 1) },
+			},
 		}
 
 		for _, tt := range tests {
-			// Arrange
+			// ===== Arrange ===== //
 			s := tt.setup()
 
-			// Act
+			// ===== Act ===== //
 			tt.action(s)
 
-			// Assert
+			// ===== Assert ===== //
 			tt.check(t, s)
 		}
 	})
 
 	t.Run("foreignKeys", func(t *testing.T) {
-		// Arrange
+		// ===== Arrange ===== //
 		type tc struct {
 			setup  func() *tableSchema
 			action func(*tableSchema)
 			check  func(t *testing.T, s *tableSchema)
 		}
 		tests := []tc{
-			{func() *tableSchema { return &tableSchema{name: "t"} }, func(s *tableSchema) { appendForeignKeyIfMissing(s, foreignKeySchema{column: "rid"}) }, func(t *testing.T, s *tableSchema) { assert.Len(t, s.foreignKeys, 1) }},
-			{func() *tableSchema { return &tableSchema{name: "t", foreignKeys: []foreignKeySchema{{column: "rid"}}} }, func(s *tableSchema) { appendForeignKeyIfMissing(s, foreignKeySchema{column: "rid"}) }, func(t *testing.T, s *tableSchema) { assert.Len(t, s.foreignKeys, 1) }},
-			{func() *tableSchema {
-				return &tableSchema{name: "t", foreignKeys: []foreignKeySchema{{column: "rid", refTable: "roles"}}}
-			}, func(s *tableSchema) { removeForeignKeyByConstraintName(s, "fk_t_roles") }, func(t *testing.T, s *tableSchema) { assert.Empty(t, s.foreignKeys) }},
-			{func() *tableSchema { return &tableSchema{name: "t", foreignKeys: []foreignKeySchema{{column: "rid"}}} }, func(s *tableSchema) { removeForeignKey(s, "rid") }, func(t *testing.T, s *tableSchema) { assert.Empty(t, s.foreignKeys) }},
+			{
+				setup:  func() *tableSchema { return &tableSchema{name: "t"} },
+				action: func(s *tableSchema) { appendForeignKeyIfMissing(s, foreignKeySchema{column: "rid"}) },
+				check:  func(t *testing.T, s *tableSchema) { assert.Len(t, s.foreignKeys, 1) },
+			},
+			{
+				setup:  func() *tableSchema { return &tableSchema{name: "t", foreignKeys: []foreignKeySchema{{column: "rid"}}} },
+				action: func(s *tableSchema) { appendForeignKeyIfMissing(s, foreignKeySchema{column: "rid"}) },
+				check:  func(t *testing.T, s *tableSchema) { assert.Len(t, s.foreignKeys, 1) },
+			},
+			{
+				setup: func() *tableSchema {
+					return &tableSchema{name: "t", foreignKeys: []foreignKeySchema{{column: "rid", refTable: "roles"}}}
+				},
+				action: func(s *tableSchema) { removeForeignKeyByConstraintName(s, "fk_t_rid") },
+				check:  func(t *testing.T, s *tableSchema) { assert.Empty(t, s.foreignKeys) },
+			},
+			{
+				setup:  func() *tableSchema { return &tableSchema{name: "t", foreignKeys: []foreignKeySchema{{column: "rid"}}} },
+				action: func(s *tableSchema) { removeForeignKey(s, "rid") },
+				check:  func(t *testing.T, s *tableSchema) { assert.Empty(t, s.foreignKeys) },
+			},
 		}
 
 		for _, tt := range tests {
-			// Arrange
+			// ===== Arrange ===== //
 			s := tt.setup()
 
-			// Act
+			// ===== Act ===== //
 			tt.action(s)
 
-			// Assert
+			// ===== Assert ===== //
 			tt.check(t, s)
 		}
 	})
 
 	t.Run("uniques", func(t *testing.T) {
-		// Arrange
+		// ===== Arrange ===== //
 		type tc struct {
 			setup  func() *tableSchema
 			action func(*tableSchema)
 			check  func(t *testing.T, s *tableSchema)
 		}
 		tests := []tc{
-			{func() *tableSchema {
-				return &tableSchema{name: "t", columns: []columnSchema{{name: "e", unique: true}}}
-			}, func(s *tableSchema) { removeUniqueByConstraintName(s, "uq_t_e") }, func(t *testing.T, s *tableSchema) { assert.False(t, s.columns[0].unique) }},
-			{func() *tableSchema { return &tableSchema{name: "t", columns: []columnSchema{{name: "e"}}} }, func(s *tableSchema) { applyGeneratedUniqueConstraint(s, "e", true) }, func(t *testing.T, s *tableSchema) { assert.True(t, s.columns[0].unique) }},
-			{func() *tableSchema {
-				return &tableSchema{name: "t", columns: []columnSchema{{name: "e", unique: true}}}
-			}, func(s *tableSchema) { applyGeneratedUniqueConstraint(s, "e", false) }, func(t *testing.T, s *tableSchema) { assert.False(t, s.columns[0].unique) }},
+			{
+				setup: func() *tableSchema {
+					return &tableSchema{name: "t", columns: []columnSchema{{name: "e", unique: true}}}
+				},
+				action: func(s *tableSchema) { removeUniqueByConstraintName(s, "uq_t_e") },
+				check:  func(t *testing.T, s *tableSchema) { assert.False(t, s.columns[0].unique) },
+			},
+			{
+				setup:  func() *tableSchema { return &tableSchema{name: "t", columns: []columnSchema{{name: "e"}}} },
+				action: func(s *tableSchema) { applyGeneratedUniqueConstraint(s, "e") },
+				check:  func(t *testing.T, s *tableSchema) { assert.True(t, s.columns[0].unique) },
+			},
 		}
 
 		for _, tt := range tests {
-			// Arrange
+			// ===== Arrange ===== //
 			s := tt.setup()
 
-			// Act
+			// ===== Act ===== //
 			tt.action(s)
 
-			// Assert
+			// ===== Assert ===== //
 			tt.check(t, s)
 		}
 	})
 
-	t.Run("lookups", func(t *testing.T) {
-		// Arrange
-		type tc struct {
-			setup func() (int, bool)
-			idx   int
-			found bool
-		}
-		tests := []tc{
-			{func() (int, bool) { return findColumnIndex([]columnSchema{{name: "id"}, {name: "e"}}, "e") }, 1, true},
-			{func() (int, bool) { return findColumnIndex([]columnSchema{{name: "id"}}, "missing") }, 0, false},
-			{func() (int, bool) {
-				return findForeignKeyIndex([]foreignKeySchema{{column: "uid"}, {column: "rid"}}, "rid")
-			}, 1, true},
-			{func() (int, bool) { return findForeignKeyIndex([]foreignKeySchema{{column: "uid"}}, "missing") }, 0, false},
-		}
-
-		for _, tt := range tests {
-			// Act
-			idx, found := tt.setup()
-
-			// Assert
-			assert.Equal(t, tt.found, found)
-			if found {
-				assert.Equal(t, tt.idx, idx)
-			}
-		}
-	})
-
 	t.Run("update", func(t *testing.T) {
-		// Arrange
+		// ===== Arrange ===== //
 		s := &tableSchema{name: "t", columns: []columnSchema{{name: "e", dataType: "TEXT"}}}
 
-		// Act
+		// ===== Act ===== //
 		updateColumn(s, "e", func(c *columnSchema) { c.dataType = "VARCHAR(20)" })
 
-		// Assert
+		// ===== Assert ===== //
 		assert.Equal(t, "VARCHAR(20)", s.columns[0].dataType)
+	})
+}
+
+// TestReplayRoundTrip proves the replay parser correctly round-trips every SQL form
+// that generate.go emits. These tests catch the class of bug where generation and
+// replay diverge silently, causing phantom ALTER migrations on every run.
+func TestReplayRoundTrip(t *testing.T) {
+	t.Run("B1: inline FK in CREATE TABLE is replayed", func(t *testing.T) {
+		// buildCreateTableSQL emits CONSTRAINT fk_<table>_<col> FOREIGN KEY (...) inline.
+		// Replay must parse this and recover the FK; otherwise the next alter re-emits it.
+		// ===== Arrange ===== //
+		s := &tableSchema{name: "orders"}
+
+		// ===== Act ===== //
+		applyGeneratedSQL(s, "CREATE TABLE orders (\n"+
+			"    id UUID PRIMARY KEY,\n"+
+			"    user_id UUID NOT NULL,\n"+
+			"    CONSTRAINT fk_orders_user_id FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE\n"+
+			");\n")
+
+		// ===== Assert ===== //
+		assert.Len(t, s.columns, 2)
+		assert.Len(t, s.foreignKeys, 1)
+		assert.Equal(t, foreignKeySchema{column: "user_id", refTable: "users", refColumn: "id", onDelete: "CASCADE"}, s.foreignKeys[0])
+	})
+
+	t.Run("B2: nullable UNIQUE column type is not corrupted", func(t *testing.T) {
+		// buildColumnDefinition for a nullable unique column emits "email TEXT UNIQUE".
+		// The type-accumulation loop must stop at UNIQUE, not include it in dataType.
+		// ===== Arrange ===== //
+		s := &tableSchema{name: "users"}
+
+		// ===== Act ===== //
+		applyGeneratedSQL(s, "CREATE TABLE users (\n    email TEXT UNIQUE\n);\n")
+
+		// ===== Assert ===== //
+		assert.Len(t, s.columns, 1)
+		assert.Equal(t, "TEXT", s.columns[0].dataType)
+		assert.True(t, s.columns[0].unique)
+	})
+
+	t.Run("B3: two FKs to same table get distinct constraint names", func(t *testing.T) {
+		// fk_<table>_<column> — column-keyed — must be unique even when refTable is the same.
+		// ===== Arrange ===== //
+		s := &tableSchema{name: "things"}
+
+		// ===== Act ===== //
+		applyGeneratedSQL(s, "CREATE TABLE things (\n"+
+			"    created_by_id UUID NOT NULL,\n"+
+			"    updated_by_id UUID NOT NULL,\n"+
+			"    CONSTRAINT fk_things_created_by_id FOREIGN KEY (created_by_id) REFERENCES users(id),\n"+
+			"    CONSTRAINT fk_things_updated_by_id FOREIGN KEY (updated_by_id) REFERENCES users(id)\n"+
+			");\n")
+
+		// ===== Assert ===== //
+		assert.Len(t, s.foreignKeys, 2)
+		assert.Equal(t, "created_by_id", s.foreignKeys[0].column)
+		assert.Equal(t, "updated_by_id", s.foreignKeys[1].column)
+
+		// Removing by constraint name must target the correct FK.
+		removeForeignKeyByConstraintName(s, "fk_things_created_by_id")
+		assert.Len(t, s.foreignKeys, 1)
+		assert.Equal(t, "updated_by_id", s.foreignKeys[0].column)
 	})
 }
