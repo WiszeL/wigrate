@@ -462,4 +462,60 @@ func Test_Migration_DiffSchema(t *testing.T) {
 
 		// ===== Assert ===== //
 	})
+
+	t.Run("rejects composite primary key changes", func(t *testing.T) {
+		// ===== Arrange ===== //
+		previous := tableSchema{name: "memberships", primaryKey: []string{"team", "user"}}
+		desired := tableSchema{name: "memberships", primaryKey: []string{"team", "role"}}
+
+		// ===== Act ===== //
+		_, err := diffSchema(previous, desired)
+
+		// ===== Assert ===== //
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "primary key change")
+	})
+
+	t.Run("detects added composite unique constraint", func(t *testing.T) {
+		// ===== Arrange ===== //
+		previous := tableSchema{name: "memberships"}
+		desired := tableSchema{name: "memberships", uniques: [][]string{{"team", "user"}}}
+
+		// ===== Act ===== //
+		diff, err := diffSchema(previous, desired)
+
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.Equal(t, [][]string{{"team", "user"}}, diff.addedUniques)
+		assert.Empty(t, diff.removedUniques)
+		assert.False(t, diff.empty())
+	})
+
+	t.Run("detects removed composite unique constraint", func(t *testing.T) {
+		// ===== Arrange ===== //
+		previous := tableSchema{name: "memberships", uniques: [][]string{{"team", "user"}}}
+		desired := tableSchema{name: "memberships"}
+
+		// ===== Act ===== //
+		diff, err := diffSchema(previous, desired)
+
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.Equal(t, [][]string{{"team", "user"}}, diff.removedUniques)
+		assert.Empty(t, diff.addedUniques)
+	})
+
+	t.Run("column-set change on a composite unique diffs as remove+add", func(t *testing.T) {
+		// ===== Arrange ===== //
+		previous := tableSchema{name: "memberships", uniques: [][]string{{"team", "user"}}}
+		desired := tableSchema{name: "memberships", uniques: [][]string{{"team", "role"}}}
+
+		// ===== Act ===== //
+		diff, err := diffSchema(previous, desired)
+
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.Equal(t, [][]string{{"team", "role"}}, diff.addedUniques)
+		assert.Equal(t, [][]string{{"team", "user"}}, diff.removedUniques)
+	})
 }

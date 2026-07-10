@@ -138,11 +138,21 @@ func writeMigrationFiles(file migrationFile, upSQL string, downSQL string) error
 }
 
 func buildCreateTableSQL(schema tableSchema) string {
-	lines := make([]string, 0, len(schema.columns)+len(schema.foreignKeys))
+	lines := make([]string, 0, len(schema.columns)+len(schema.foreignKeys)+1+len(schema.uniques))
 
 	// Building columns
 	for _, column := range schema.columns {
 		lines = append(lines, "    "+buildColumnDefinition(column))
+	}
+
+	// Composite primary key (single-column PK stays inline on the column)
+	if len(schema.primaryKey) > 0 {
+		lines = append(lines, "    PRIMARY KEY ("+strings.Join(schema.primaryKey, ", ")+")")
+	}
+
+	// Composite unique constraints
+	for _, cols := range schema.uniques {
+		lines = append(lines, "    CONSTRAINT "+buildUniqueConstraintDefinition(schema.name, cols))
 	}
 
 	// Building foreign keys
@@ -175,6 +185,9 @@ func buildAlterUpLines(diff schemaDiff) []string {
 	for _, change := range diff.changedForeignKeys {
 		lines = append(lines, dropForeignKeyLine(diff.tableName, change.before))
 	}
+	for _, cols := range diff.removedUniques {
+		lines = append(lines, dropCompositeUniqueLine(diff.tableName, cols))
+	}
 
 	// Removing columns
 	for _, column := range diff.removedColumns {
@@ -192,6 +205,9 @@ func buildAlterUpLines(diff schemaDiff) []string {
 	}
 
 	// Add constraints after their columns are guaranteed to exist.
+	for _, cols := range diff.addedUniques {
+		lines = append(lines, addCompositeUniqueLine(diff.tableName, cols))
+	}
 	for _, foreignKey := range diff.addedForeignKeys {
 		lines = append(lines, addForeignKeyLine(diff.tableName, foreignKey))
 	}
@@ -214,6 +230,9 @@ func buildAlterDownLines(diff schemaDiff) []string {
 	for i := len(diff.addedForeignKeys) - 1; i >= 0; i-- {
 		lines = append(lines, dropForeignKeyLine(diff.tableName, diff.addedForeignKeys[i]))
 	}
+	for i := len(diff.addedUniques) - 1; i >= 0; i-- {
+		lines = append(lines, dropCompositeUniqueLine(diff.tableName, diff.addedUniques[i]))
+	}
 
 	// Removing added columns
 	for i := len(diff.addedColumns) - 1; i >= 0; i-- {
@@ -229,6 +248,9 @@ func buildAlterDownLines(diff schemaDiff) []string {
 		lines = append(lines, addColumnLine(diff.removedColumns[i]))
 	}
 	// Adding back removed constraints
+	for i := len(diff.removedUniques) - 1; i >= 0; i-- {
+		lines = append(lines, addCompositeUniqueLine(diff.tableName, diff.removedUniques[i]))
+	}
 	for i := len(diff.changedForeignKeys) - 1; i >= 0; i-- {
 		lines = append(lines, addForeignKeyLine(diff.tableName, diff.changedForeignKeys[i].before))
 	}
@@ -243,7 +265,7 @@ func buildAlterColumnChangeLines(tableName string, before columnSchema, after co
 	var lines []string
 	// Removing unique
 	if before.unique && !after.unique {
-		lines = append(lines, dropUniqueLine(tableName, before))
+		lines = append(lines, dropCompositeUniqueLine(tableName, []string{before.name}))
 	}
 
 	// Changing type
@@ -256,7 +278,7 @@ func buildAlterColumnChangeLines(tableName string, before columnSchema, after co
 
 	// Adding unique
 	if !before.unique && after.unique {
-		lines = append(lines, addUniqueLine(tableName, after))
+		lines = append(lines, addCompositeUniqueLine(tableName, []string{after.name}))
 	}
 
 	return lines
@@ -278,12 +300,12 @@ func dropForeignKeyLine(tableName string, foreignKey foreignKeySchema) string {
 	return "    DROP CONSTRAINT IF EXISTS " + foreignKeyConstraintName(tableName, foreignKey.column)
 }
 
-func addUniqueLine(tableName string, column columnSchema) string {
-	return "    ADD CONSTRAINT " + buildUniqueConstraintDefinition(tableName, column.name)
+func addCompositeUniqueLine(tableName string, cols []string) string {
+	return "    ADD CONSTRAINT " + buildUniqueConstraintDefinition(tableName, cols)
 }
 
-func dropUniqueLine(tableName string, column columnSchema) string {
-	return "    DROP CONSTRAINT IF EXISTS " + uniqueConstraintName(tableName, column.name)
+func dropCompositeUniqueLine(tableName string, cols []string) string {
+	return "    DROP CONSTRAINT IF EXISTS " + uniqueConstraintName(tableName, cols...)
 }
 
 func buildColumnDefinition(column columnSchema) string {
@@ -341,10 +363,10 @@ func foreignKeyConstraintName(tableName string, column string) string {
 	return "fk_" + tableName + "_" + column
 }
 
-func buildUniqueConstraintDefinition(tableName string, columnName string) string {
-	return uniqueConstraintName(tableName, columnName) + " UNIQUE (" + columnName + ")"
+func buildUniqueConstraintDefinition(tableName string, columns []string) string {
+	return uniqueConstraintName(tableName, columns...) + " UNIQUE (" + strings.Join(columns, ", ") + ")"
 }
 
-func uniqueConstraintName(tableName string, columnName string) string {
-	return "uq_" + tableName + "_" + columnName
+func uniqueConstraintName(tableName string, columns ...string) string {
+	return "uq_" + tableName + "_" + strings.Join(columns, "_")
 }

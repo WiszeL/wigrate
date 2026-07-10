@@ -15,6 +15,8 @@ type tableSchema struct {
 	name        string
 	columns     []columnSchema
 	foreignKeys []foreignKeySchema
+	primaryKey  []string   // composite PK column names, in order (empty => single/no PK, stays inline column bool)
+	uniques     [][]string // composite unique groups, each >=2 cols, in order
 }
 
 type columnSchema struct {
@@ -33,12 +35,13 @@ type foreignKeySchema struct {
 }
 
 type fieldComment struct {
-	length     int
-	nullable   bool
-	unique     bool
-	primary    bool
-	refTable   string
-	deleteRule string
+	length      int
+	nullable    bool
+	unique      bool
+	primary     bool
+	refTable    string
+	deleteRule  string
+	uniqueGroup string
 }
 
 func parseEntitySchema(module migrationModule, entityName string) (tableSchema, error) {
@@ -61,36 +64,93 @@ func parseEntitySchema(module migrationModule, entityName string) (tableSchema, 
 	schema := tableSchema{name: tableNameFromEntity(entityName)}
 
 	// Mapping fields to table schema
+	var uniqueGroups []string // parallel to schema.columns; "" = no group
 	for _, field := range structType.Fields.List {
-		columns, foreignKeys, err := mapStructFieldToSchema(structName, field)
+		columns, foreignKeys, groups, err := mapStructFieldToSchema(structName, field)
 		if err != nil {
 			return tableSchema{}, err
 		}
 		schema.columns = append(schema.columns, columns...)
 		schema.foreignKeys = append(schema.foreignKeys, foreignKeys...)
+		uniqueGroups = append(uniqueGroups, groups...)
 	}
 
 	if len(schema.columns) == 0 {
 		return tableSchema{}, fmt.Errorf("entity struct %s has no exported fields", structName)
 	}
 
+	foldCompositePrimaryKey(&schema)
+	foldCompositeUniques(&schema, uniqueGroups)
+
 	return schema, nil
 }
 
-func mapStructFieldToSchema(structName string, field *ast.Field) ([]columnSchema, []foreignKeySchema, error) {
+// foldCompositePrimaryKey collects columns marked `pk`. Two or more become a
+// table-level composite PRIMARY KEY; a single one stays as the inline column bool.
+func foldCompositePrimaryKey(schema *tableSchema) {
+	var members []int
+	for i, column := range schema.columns {
+		if column.primary {
+			members = append(members, i)
+		}
+	}
+	if len(members) < 2 {
+		return
+	}
+
+	for _, i := range members {
+		schema.primaryKey = append(schema.primaryKey, schema.columns[i].name)
+		schema.columns[i].primary = false
+		schema.columns[i].notNull = true
+	}
+}
+
+// foldCompositeUniques groups columns sharing a `unique:<group>` label into
+// table-level composite UNIQUE constraints. A group of size 1 degrades to the
+// inline single-column UNIQUE.
+func foldCompositeUniques(schema *tableSchema, groups []string) {
+	order := make([]string, 0)
+	indexByGroup := make(map[string][]int)
+	for i, group := range groups {
+		if group == "" {
+			continue
+		}
+		if _, ok := indexByGroup[group]; !ok {
+			order = append(order, group)
+		}
+		indexByGroup[group] = append(indexByGroup[group], i)
+	}
+
+	for _, group := range order {
+		members := indexByGroup[group]
+		if len(members) == 1 {
+			schema.columns[members[0]].unique = true
+			continue
+		}
+
+		var cols []string
+		for _, i := range members {
+			cols = append(cols, schema.columns[i].name)
+		}
+		schema.uniques = append(schema.uniques, cols)
+	}
+}
+
+func mapStructFieldToSchema(structName string, field *ast.Field) ([]columnSchema, []foreignKeySchema, []string, error) {
 	if len(field.Names) == 0 {
-		return nil, nil, fmt.Errorf("%s: embedded fields are not supported", structName)
+		return nil, nil, nil, fmt.Errorf("%s: embedded fields are not supported", structName)
 	}
 
 	// Parsing the field comment
 	comment, err := parseFieldComment(field)
 	if err != nil {
-		return nil, nil, fmt.Errorf("%s: %w", structName, err)
+		return nil, nil, nil, fmt.Errorf("%s: %w", structName, err)
 	}
 
 	// Mapping exported fields to columns and FKs
 	var columns []columnSchema
 	var foreignKeys []foreignKeySchema
+	var groups []string
 	for _, name := range field.Names {
 		if !name.IsExported() {
 			continue
@@ -98,20 +158,21 @@ func mapStructFieldToSchema(structName string, field *ast.Field) ([]columnSchema
 
 		column, err := mapFieldToColumn(name.Name, field.Type, comment)
 		if err != nil {
-			return nil, nil, fmt.Errorf("%s.%s: %w", structName, name.Name, err)
+			return nil, nil, nil, fmt.Errorf("%s.%s: %w", structName, name.Name, err)
 		}
 		columns = append(columns, column)
+		groups = append(groups, comment.uniqueGroup)
 
 		foreignKey, ok, err := mapFieldToForeignKey(name.Name, column, comment)
 		if err != nil {
-			return nil, nil, fmt.Errorf("%s.%s: %w", structName, name.Name, err)
+			return nil, nil, nil, fmt.Errorf("%s.%s: %w", structName, name.Name, err)
 		}
 		if ok {
 			foreignKeys = append(foreignKeys, foreignKey)
 		}
 	}
 
-	return columns, foreignKeys, nil
+	return columns, foreignKeys, groups, nil
 }
 
 // findStruct locates a struct whose snake_case name matches entityName.
@@ -164,6 +225,11 @@ func parseFieldComment(field *ast.Field) (fieldComment, error) {
 			comment.refTable = strings.TrimPrefix(token, "ref:")
 			if comment.refTable == "" {
 				return fieldComment{}, fmt.Errorf("empty ref table")
+			}
+		case strings.HasPrefix(token, "unique:"):
+			comment.uniqueGroup = strings.TrimPrefix(token, "unique:")
+			if comment.uniqueGroup == "" {
+				return fieldComment{}, fmt.Errorf("empty unique group")
 			}
 		case strings.HasPrefix(token, "del:"):
 			rule, err := normalizeDeleteRule(strings.TrimPrefix(token, "del:"))

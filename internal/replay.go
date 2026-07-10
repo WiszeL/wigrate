@@ -64,9 +64,17 @@ func applyGeneratedSQL(schema *tableSchema, sql string) {
 
 		// Dispatching by SQL prefix
 		switch {
+		case strings.HasPrefix(line, "PRIMARY KEY ("):
+			if cols, ok := parseGeneratedColumnList(strings.TrimPrefix(line, "PRIMARY KEY ")); ok {
+				schema.primaryKey = cols
+			}
 		case strings.HasPrefix(line, "ADD CONSTRAINT ") && strings.Contains(line, " UNIQUE "):
-			if columnName, ok := parseGeneratedUniqueConstraint(line); ok {
-				applyGeneratedUniqueConstraint(schema, columnName)
+			if cols, ok := parseGeneratedUniqueConstraint(line); ok {
+				applyGeneratedUniqueConstraint(schema, cols)
+			}
+		case strings.HasPrefix(line, "CONSTRAINT ") && strings.Contains(line, " UNIQUE "):
+			if cols, ok := parseGeneratedUniqueConstraint(line); ok {
+				applyGeneratedUniqueConstraint(schema, cols)
 			}
 		case strings.HasPrefix(line, "CONSTRAINT ") && strings.Contains(line, " FOREIGN KEY "):
 			if fk, ok := parseGeneratedAlterForeignKey(line); ok {
@@ -153,19 +161,35 @@ func parseGeneratedColumn(line string) (columnSchema, bool) {
 	return column, true
 }
 
-func parseGeneratedUniqueConstraint(line string) (string, bool) {
-	parts := strings.Fields(line)
-	if len(parts) != 5 || parts[0] != "ADD" || parts[1] != "CONSTRAINT" || parts[3] != "UNIQUE" {
-		return "", false
+// parseGeneratedUniqueConstraint extracts the column list from either an
+// "ADD CONSTRAINT uq_... UNIQUE (a, b)" (alter) or "CONSTRAINT uq_... UNIQUE (a, b)"
+// (create) line, single or composite.
+func parseGeneratedUniqueConstraint(line string) ([]string, bool) {
+	_, after, ok := strings.Cut(line, " UNIQUE ")
+	if !ok {
+		return nil, false
 	}
 
-	column := strings.TrimPrefix(parts[4], "(")
-	column = strings.TrimSuffix(column, ")")
-	if column == "" {
-		return "", false
+	return parseGeneratedColumnList(after)
+}
+
+// parseGeneratedColumnList extracts a parenthesized, comma-separated column list, e.g. "(a, b)".
+func parseGeneratedColumnList(text string) ([]string, bool) {
+	text = strings.TrimSpace(text)
+	if !strings.HasPrefix(text, "(") || !strings.HasSuffix(text, ")") {
+		return nil, false
 	}
 
-	return column, true
+	var columns []string
+	for part := range strings.SplitSeq(text[1:len(text)-1], ",") {
+		column := strings.TrimSpace(part)
+		if column == "" {
+			return nil, false
+		}
+		columns = append(columns, column)
+	}
+
+	return columns, len(columns) > 0
 }
 
 func parseGeneratedAlterForeignKey(line string) (foreignKeySchema, bool) {
@@ -252,10 +276,21 @@ func updateColumn(schema *tableSchema, columnName string, update func(*columnSch
 	update(&schema.columns[i])
 }
 
-func applyGeneratedUniqueConstraint(schema *tableSchema, columnName string) {
-	updateColumn(schema, columnName, func(column *columnSchema) {
-		column.unique = true
-	})
+func applyGeneratedUniqueConstraint(schema *tableSchema, columns []string) {
+	if len(columns) == 1 {
+		updateColumn(schema, columns[0], func(column *columnSchema) {
+			column.unique = true
+		})
+		return
+	}
+
+	name := uniqueConstraintName(schema.name, columns...)
+	for _, existing := range schema.uniques {
+		if uniqueConstraintName(schema.name, existing...) == name {
+			return
+		}
+	}
+	schema.uniques = append(schema.uniques, columns)
 }
 
 func appendForeignKeyIfMissing(schema *tableSchema, foreignKey foreignKeySchema) {
@@ -275,11 +310,17 @@ func removeForeignKeyByConstraintName(schema *tableSchema, constraintName string
 }
 
 func removeUniqueByConstraintName(schema *tableSchema, constraintName string) {
-	i := slices.IndexFunc(schema.columns, func(col columnSchema) bool {
+	if i := slices.IndexFunc(schema.columns, func(col columnSchema) bool {
 		return uniqueConstraintName(schema.name, col.name) == constraintName
-	})
-	if i >= 0 {
+	}); i >= 0 {
 		schema.columns[i].unique = false
+		return
+	}
+
+	if i := slices.IndexFunc(schema.uniques, func(cols []string) bool {
+		return uniqueConstraintName(schema.name, cols...) == constraintName
+	}); i >= 0 {
+		schema.uniques = slices.Delete(schema.uniques, i, i+1)
 	}
 }
 

@@ -3,6 +3,8 @@ package internal
 import (
 	"fmt"
 	"os"
+	"slices"
+	"strings"
 )
 
 type schemaDiff struct {
@@ -13,6 +15,8 @@ type schemaDiff struct {
 	addedForeignKeys   []foreignKeySchema
 	removedForeignKeys []foreignKeySchema
 	changedForeignKeys []foreignKeyChange
+	addedUniques       [][]string
+	removedUniques     [][]string
 }
 
 type columnChange struct {
@@ -26,7 +30,11 @@ type foreignKeyChange struct {
 }
 
 func diffSchema(previous tableSchema, desired tableSchema) (schemaDiff, error) {
-	// Primary key changes are intentionally manual in v1.
+	// Primary key changes are intentionally manual in v1 (single-column and composite alike).
+	if !slices.Equal(previous.primaryKey, desired.primaryKey) {
+		return schemaDiff{}, fmt.Errorf("primary key change is not supported in alter migration")
+	}
+
 	diff := schemaDiff{tableName: desired.name}
 
 	previousColumns := columnsByName(previous.columns)
@@ -87,7 +95,33 @@ func diffSchema(previous tableSchema, desired tableSchema) (schemaDiff, error) {
 		}
 	}
 
+	// Composite unique constraints, keyed by their constraint name (a column-set
+	// change yields a different name, so it naturally diffs as remove+add).
+	// Iterate the original slices (not the name maps) to keep output order deterministic.
+	previousUniqueNames := uniqueNameSet(desired.name, previous.uniques)
+	desiredUniqueNames := uniqueNameSet(desired.name, desired.uniques)
+
+	for _, cols := range desired.uniques {
+		if _, ok := previousUniqueNames[uniqueConstraintName(desired.name, cols...)]; !ok {
+			diff.addedUniques = append(diff.addedUniques, cols)
+		}
+	}
+	for _, cols := range previous.uniques {
+		if _, ok := desiredUniqueNames[uniqueConstraintName(desired.name, cols...)]; !ok {
+			diff.removedUniques = append(diff.removedUniques, cols)
+		}
+	}
+
 	return diff, nil
+}
+
+func uniqueNameSet(tableName string, uniques [][]string) map[string]struct{} {
+	names := make(map[string]struct{}, len(uniques))
+	for _, cols := range uniques {
+		names[uniqueConstraintName(tableName, cols...)] = struct{}{}
+	}
+
+	return names
 }
 
 func (diff schemaDiff) empty() bool {
@@ -96,7 +130,9 @@ func (diff schemaDiff) empty() bool {
 		len(diff.changedColumns) == 0 &&
 		len(diff.addedForeignKeys) == 0 &&
 		len(diff.removedForeignKeys) == 0 &&
-		len(diff.changedForeignKeys) == 0
+		len(diff.changedForeignKeys) == 0 &&
+		len(diff.addedUniques) == 0 &&
+		len(diff.removedUniques) == 0
 }
 
 func (diff schemaDiff) changedColumnNames() []string {
@@ -128,6 +164,12 @@ func (diff schemaDiff) changedColumnNames() []string {
 	}
 	for _, change := range diff.changedForeignKeys {
 		appendName(change.after.column)
+	}
+	for _, cols := range diff.addedUniques {
+		appendName(strings.Join(cols, "_"))
+	}
+	for _, cols := range diff.removedUniques {
+		appendName(strings.Join(cols, "_"))
 	}
 
 	return names

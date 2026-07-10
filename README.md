@@ -102,9 +102,40 @@ type User struct {
 | `<number>` | `string` | Set VARCHAR length. Without it, `string` → `TEXT` |
 | `null` | Any | Column is nullable (omit NOT NULL) |
 | `unique` | Any | Add UNIQUE constraint |
-| `pk` | Any | Mark as PRIMARY KEY (overrides default ID→PK behavior) |
+| `unique:<group>` | Any | Group two or more fields into one composite UNIQUE constraint |
+| `pk` | Any | Mark as PRIMARY KEY (overrides default ID→PK behavior). Two or more `pk` fields form a composite PRIMARY KEY |
 | `ref:<table>` | Foreign key field | Set the referenced table (overrides convention-based table name) |
 | `del:<rule>` | Foreign key field | Set ON DELETE rule: `cascade`, `setnull`, `restrict`, `noaction` |
+
+### Composite Keys
+
+Mark two or more fields `pk` for a composite PRIMARY KEY, or share the same `unique:<group>`
+label for a composite UNIQUE constraint. Composite FK is not supported.
+
+```go
+type Membership struct {
+    TeamID uuid.UUID // pk
+    UserID uuid.UUID // pk
+    RoleID uuid.UUID // unique:role del:cascade
+    Label  string    // unique:role
+}
+```
+
+```sql
+CREATE TABLE memberships (
+    team_id UUID NOT NULL,
+    user_id UUID NOT NULL,
+    role_id UUID NOT NULL,
+    label TEXT NOT NULL,
+    PRIMARY KEY (team_id, user_id),
+    CONSTRAINT uq_memberships_role_id_label UNIQUE (role_id, label),
+    CONSTRAINT fk_memberships_role_id FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE
+);
+```
+
+Composite UNIQUE can be added/removed via alter migrations like any other constraint.
+Composite PRIMARY KEY, like single-column PK, can only be set at CREATE TABLE time —
+changing it later is blocked in alter migrations (see Limitations).
 
 ### Field Descriptions
 
@@ -292,7 +323,8 @@ This is a safety signal — the diff engine cannot distinguish a rename from a d
 
 ### Limitations (v1)
 
-- Primary key changes (adding, removing, or changing a PK column) are intentionally blocked in alter migrations
+- Primary key changes (adding, removing, or changing PK columns — single or composite) are intentionally blocked in alter migrations
+- Composite foreign keys are not supported
 - Supported types: `string`, `int`, `int32`, `int64`, `bool`, `float32`, `float64`, `time.Time`, `uuid.UUID`
 - Only PostgreSQL is supported as a target
 - No default value support in the inline DSL

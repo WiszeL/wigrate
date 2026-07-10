@@ -73,13 +73,15 @@ type Post struct {
 
 	t.Run("honors pk annotation for non-ID field", func(t *testing.T) {
 		// ===== Arrange ===== //
+		// ID is always primary; an explicit `pk` on another field now folds
+		// both into a composite primary key rather than two inline PK columns.
 		module := makeTestMigrationModule(t, "shop", "custom.go", `package entity
 
 import "github.com/google/uuid"
 
 type Custom struct {
 	ID   uuid.UUID
-	Code string // 20 unique pk
+	Code string // 20 pk
 }
 `)
 
@@ -89,8 +91,53 @@ type Custom struct {
 		// ===== Assert ===== //
 		assert.NoError(t, err)
 		assert.Len(t, schema.columns, 2)
-		assert.True(t, schema.columns[1].primary)
-		assert.Equal(t, "code", schema.columns[1].name)
+		assert.False(t, schema.columns[0].primary)
+		assert.False(t, schema.columns[1].primary)
+		assert.Equal(t, []string{"id", "code"}, schema.primaryKey)
+	})
+
+	t.Run("folds unique:<group> into a composite unique constraint", func(t *testing.T) {
+		// ===== Arrange ===== //
+		module := makeTestMigrationModule(t, "shop", "membership.go", `package entity
+
+import "github.com/google/uuid"
+
+type Membership struct {
+	ID     uuid.UUID
+	TeamID uuid.UUID // unique:member
+	UserID uuid.UUID // unique:member
+}
+`)
+
+		// ===== Act ===== //
+		schema, err := parseEntitySchema(module, "membership")
+
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.False(t, schema.columns[1].unique)
+		assert.False(t, schema.columns[2].unique)
+		assert.Equal(t, [][]string{{"team_id", "user_id"}}, schema.uniques)
+	})
+
+	t.Run("single-member unique group degrades to inline unique", func(t *testing.T) {
+		// ===== Arrange ===== //
+		module := makeTestMigrationModule(t, "shop", "solo.go", `package entity
+
+import "github.com/google/uuid"
+
+type Solo struct {
+	ID   uuid.UUID
+	Code string // unique:only
+}
+`)
+
+		// ===== Act ===== //
+		schema, err := parseEntitySchema(module, "solo")
+
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.True(t, schema.columns[1].unique)
+		assert.Empty(t, schema.uniques)
 	})
 
 	t.Run("makes pointer field nullable by default", func(t *testing.T) {

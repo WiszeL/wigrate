@@ -436,3 +436,101 @@ func stubDryRun(t *testing.T, value bool) func() {
 		DryRun = original
 	}
 }
+
+func Test_Migration_MakeInitMigrationComposite(t *testing.T) {
+	t.Run("creates init migration with composite PK and composite unique", func(t *testing.T) {
+		// ===== Arrange ===== //
+		module := makeTestMigrationModule(t, "shop", "membership.go", `package entity
+
+import "github.com/google/uuid"
+
+type Membership struct {
+	Team   uuid.UUID // pk
+	User   uuid.UUID // pk
+	RoleID uuid.UUID // unique:role del:cascade
+	Label  string    // unique:role
+}
+`)
+
+		restoreRunCommand := stubRunCommand(t, func(cmd string, args ...string) error {
+			upPath := filepath.Join(module.migrationDir, "000001_init_membership.up.sql")
+			downPath := filepath.Join(module.migrationDir, "000001_init_membership.down.sql")
+			assert.NoError(t, os.WriteFile(upPath, []byte(""), 0644))
+			assert.NoError(t, os.WriteFile(downPath, []byte(""), 0644))
+			return nil
+		})
+		defer restoreRunCommand()
+
+		// ===== Act ===== //
+		err := makeInitMigration(module, "membership")
+
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+
+		upSQL, err := os.ReadFile(filepath.Join(module.migrationDir, "000001_init_membership.up.sql"))
+		assert.NoError(t, err)
+
+		assert.Equal(t, `CREATE TABLE memberships (
+    team UUID NOT NULL,
+    user UUID NOT NULL,
+    role_id UUID NOT NULL,
+    label TEXT NOT NULL,
+    PRIMARY KEY (team, user),
+    CONSTRAINT uq_memberships_role_id_label UNIQUE (role_id, label),
+    CONSTRAINT fk_memberships_role_id FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE
+);
+`, string(upSQL))
+	})
+}
+
+func Test_Migration_MakeAlterMigrationCompositeUnique(t *testing.T) {
+	t.Run("adds and removes a composite unique constraint via alter", func(t *testing.T) {
+		// ===== Arrange ===== //
+		module := makeTestMigrationModule(t, "shop", "membership.go", `package entity
+
+import "github.com/google/uuid"
+
+type Membership struct {
+	ID   uuid.UUID
+	Team uuid.UUID // unique:member
+	User uuid.UUID // unique:member
+}
+`)
+		assert.NoError(t, os.WriteFile(filepath.Join(module.migrationDir, "000001_init_membership.up.sql"), []byte(`CREATE TABLE memberships (
+    id UUID PRIMARY KEY,
+    team UUID NOT NULL,
+    user UUID NOT NULL
+);
+`), 0644))
+		assert.NoError(t, os.WriteFile(filepath.Join(module.migrationDir, "000001_init_membership.down.sql"), []byte("DROP TABLE IF EXISTS memberships;\n"), 0644))
+
+		restoreRunCommand := stubRunCommand(t, func(cmd string, args ...string) error {
+			upPath := filepath.Join(module.migrationDir, "000002_alter_team_user_membership.up.sql")
+			downPath := filepath.Join(module.migrationDir, "000002_alter_team_user_membership.down.sql")
+			assert.NoError(t, os.WriteFile(upPath, []byte(""), 0644))
+			assert.NoError(t, os.WriteFile(downPath, []byte(""), 0644))
+			return nil
+		})
+		defer restoreRunCommand()
+
+		// ===== Act ===== //
+		entries, err := os.ReadDir(module.migrationDir)
+		require.NoError(t, err)
+		err = makeAlterMigration(module, entries, "membership")
+
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+
+		upSQL, err := os.ReadFile(filepath.Join(module.migrationDir, "000002_alter_team_user_membership.up.sql"))
+		assert.NoError(t, err)
+		downSQL, err := os.ReadFile(filepath.Join(module.migrationDir, "000002_alter_team_user_membership.down.sql"))
+		assert.NoError(t, err)
+
+		assert.Equal(t, `ALTER TABLE memberships
+    ADD CONSTRAINT uq_memberships_team_user UNIQUE (team, user);
+`, string(upSQL))
+		assert.Equal(t, `ALTER TABLE memberships
+    DROP CONSTRAINT IF EXISTS uq_memberships_team_user;
+`, string(downSQL))
+	})
+}

@@ -92,13 +92,14 @@ func TestReplayUniqueConstraint(t *testing.T) {
 	t.Run("parse", func(t *testing.T) {
 		// ===== Arrange ===== //
 		tests := []struct {
-			in  string
-			col string
-			ok  bool
+			in   string
+			cols []string
+			ok   bool
 		}{
-			{"ADD CONSTRAINT uq UNIQUE (email)", "email", true},
-			{"ADD CONSTRAINT uq UNIQUE ()", "", false},
-			{"bad", "", false},
+			{"ADD CONSTRAINT uq UNIQUE (email)", []string{"email"}, true},
+			{"ADD CONSTRAINT uq UNIQUE (a, b)", []string{"a", "b"}, true},
+			{"ADD CONSTRAINT uq UNIQUE ()", nil, false},
+			{"bad", nil, false},
 		}
 
 		for _, tt := range tests {
@@ -108,7 +109,7 @@ func TestReplayUniqueConstraint(t *testing.T) {
 			// ===== Assert ===== //
 			assert.Equal(t, tt.ok, ok)
 			if ok {
-				assert.Equal(t, tt.col, got)
+				assert.Equal(t, tt.cols, got)
 			}
 		}
 	})
@@ -532,7 +533,7 @@ func TestReplayHelpers(t *testing.T) {
 			},
 			{
 				setup:  func() *tableSchema { return &tableSchema{name: "t", columns: []columnSchema{{name: "e"}}} },
-				action: func(s *tableSchema) { applyGeneratedUniqueConstraint(s, "e") },
+				action: func(s *tableSchema) { applyGeneratedUniqueConstraint(s, []string{"e"}) },
 				check:  func(t *testing.T, s *tableSchema) { assert.True(t, s.columns[0].unique) },
 			},
 		}
@@ -621,5 +622,44 @@ func TestReplayRoundTrip(t *testing.T) {
 		removeForeignKeyByConstraintName(s, "fk_things_created_by_id")
 		assert.Len(t, s.foreignKeys, 1)
 		assert.Equal(t, "updated_by_id", s.foreignKeys[0].column)
+	})
+
+	t.Run("B4: composite PRIMARY KEY and composite UNIQUE in CREATE TABLE are replayed", func(t *testing.T) {
+		// buildCreateTableSQL emits table-level "PRIMARY KEY (a, b)" and
+		// "CONSTRAINT uq_... UNIQUE (a, b)" for composites. Replay must recover both
+		// without setting the per-column primary/unique bools.
+		// ===== Arrange ===== //
+		s := &tableSchema{name: "memberships"}
+
+		// ===== Act ===== //
+		applyGeneratedSQL(s, "CREATE TABLE memberships (\n"+
+			"    team UUID NOT NULL,\n"+
+			"    user UUID NOT NULL,\n"+
+			"    role TEXT NOT NULL,\n"+
+			"    label TEXT NOT NULL,\n"+
+			"    PRIMARY KEY (team, user),\n"+
+			"    CONSTRAINT uq_memberships_role_label UNIQUE (role, label)\n"+
+			");\n")
+
+		// ===== Assert ===== //
+		assert.Equal(t, []string{"team", "user"}, s.primaryKey)
+		assert.Equal(t, [][]string{{"role", "label"}}, s.uniques)
+		for _, column := range s.columns {
+			assert.False(t, column.primary)
+			assert.False(t, column.unique)
+		}
+	})
+
+	t.Run("B5: DROP CONSTRAINT removes a composite unique group", func(t *testing.T) {
+		// The alter-generated DROP CONSTRAINT IF EXISTS must also match composite
+		// unique constraints, not just single-column ones.
+		// ===== Arrange ===== //
+		s := &tableSchema{name: "memberships", uniques: [][]string{{"role", "label"}}}
+
+		// ===== Act ===== //
+		applyGeneratedSQL(s, "ALTER TABLE memberships\n    DROP CONSTRAINT IF EXISTS uq_memberships_role_label;\n")
+
+		// ===== Assert ===== //
+		assert.Empty(t, s.uniques)
 	})
 }
