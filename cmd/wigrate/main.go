@@ -182,7 +182,8 @@ Entity field comment DSL (inline, trailing comment only):
   <number>        string length -> VARCHAR(n); no number -> TEXT
   null            column is nullable (pointer types are nullable by default, no annotation needed)
   unique          add UNIQUE constraint
-  pk              mark PRIMARY KEY (default: field named ID)
+  unique:<group>  group 2+ fields sharing the same <group> label into one composite UNIQUE constraint
+  pk              mark PRIMARY KEY (default: field named ID); 2+ pk fields form a composite PRIMARY KEY
   ref:<table>     foreign key target table (default: derived from "<Name>ID" field -> snake_case, pluralized)
   del:<rule>      ON DELETE rule for a foreign key: cascade | setnull | restrict | noaction
   A human-readable description does NOT go inline (every inline token must be valid DSL above and
@@ -192,10 +193,11 @@ Entity field comment DSL (inline, trailing comment only):
 
 Naming conventions:
   Struct/field PascalCase -> table/column snake_case, table names pluralized.
-  FK column: fk_<table>_<refTable>. Unique constraint: uq_<table>_<column>.
+  FK column: fk_<table>_<refTable>. Unique constraint: uq_<table>_<column1>_<column2>...
 
 Supported Go types: string, int, int32, int64, bool, float32, float64, time.Time, uuid.UUID.
-Limitations: no default-value DSL; PK changes are blocked in alter migrations (v1).
+Limitations: no default-value DSL; PK changes (single or composite) are blocked in alter
+migrations (v1); composite foreign keys are not supported.
 
 Run "wigrate <command> --help" for command-specific flags.
 `)
