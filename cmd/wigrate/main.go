@@ -145,10 +145,58 @@ func printVersion() {
 }
 
 func printUsage() {
-	fmt.Fprintln(os.Stderr, "Usage:")
-	fmt.Fprintln(os.Stderr, "  wigrate gen [-o|--overwrite] [-m=<module>|--module=<module>] [--modules-dir=<dir>] [--dry-run]")
-	fmt.Fprintln(os.Stderr, "  wigrate up [-m=<module>|--module=<module>] [--modules-dir=<dir>]")
-	fmt.Fprintln(os.Stderr, "  wigrate down <steps> [-m=<module>|--module=<module>] [--modules-dir=<dir>]")
-	fmt.Fprintln(os.Stderr, "  wigrate status [-m=<module>|--module=<module>] [--modules-dir=<dir>]")
-	fmt.Fprintln(os.Stderr, "  wigrate version")
+	fmt.Fprint(os.Stderr, `wigrate — schema migration generator for Go entity structs (PostgreSQL only)
+
+Reads Go entity structs via go/ast, diffs them against replayed migration history,
+generates SQL migration files, and delegates execution to the golang-migrate CLI.
+Each module owns its schema under module/<name>/migration/ with its own
+golang-migrate tracking table (schema_migrations_<name>).
+
+Usage:
+  wigrate gen [-o|--overwrite] [-m=<module>|--module=<module>] [--modules-dir=<dir>] [--dry-run]
+  wigrate up [-m=<module>|--module=<module>] [--modules-dir=<dir>]
+  wigrate down <steps> [-m=<module>|--module=<module>] [--modules-dir=<dir>]
+  wigrate status [-m=<module>|--module=<module>] [--modules-dir=<dir>]
+  wigrate version
+
+Commands:
+  gen       Discover modules, parse entity structs, diff vs migration history, write SQL.
+  up        Apply pending migrations via golang-migrate.
+  down      Roll back <steps> migrations (step count required, no implicit "1").
+  status    Print current migration version and dirty state per module.
+  version   Print wigrate build version.
+
+Flags:
+  -o, --overwrite         Overwrite the latest migration instead of creating a new alter (gen only)
+  -m, --module=<name>     Restrict to one module (empty/omitted = all modules)
+      --modules-dir=<dir> Base directory for modules, absolute or relative to project root (default "module")
+      --dry-run           Print generated SQL without writing files or invoking migrate (gen only)
+
+Module layout (required):
+  module/<name>/internal/domain/entity/<entity>.go   — Go struct, file name = struct name in snake_case
+  module/<name>/migration/                           — generated *.up.sql / *.down.sql + tracking table
+  module/<name>/migration/.wigrateignore              — optional: entity names (one per line, # comments ok)
+                                                         to exclude from migration (e.g. a Redis-only entity)
+
+Entity field comment DSL (inline, trailing comment only):
+  <number>        string length -> VARCHAR(n); no number -> TEXT
+  null            column is nullable (pointer types are nullable by default, no annotation needed)
+  unique          add UNIQUE constraint
+  pk              mark PRIMARY KEY (default: field named ID)
+  ref:<table>     foreign key target table (default: derived from "<Name>ID" field -> snake_case, pluralized)
+  del:<rule>      ON DELETE rule for a foreign key: cascade | setnull | restrict | noaction
+  A human-readable description does NOT go inline (every inline token must be valid DSL above and
+  will error otherwise) — put it in the comment ABOVE the field instead, which is never parsed:
+    // DPoP key thumbprint bound at login
+    Thumbprint string // 100 unique
+
+Naming conventions:
+  Struct/field PascalCase -> table/column snake_case, table names pluralized.
+  FK column: fk_<table>_<refTable>. Unique constraint: uq_<table>_<column>.
+
+Supported Go types: string, int, int32, int64, bool, float32, float64, time.Time, uuid.UUID.
+Limitations: no default-value DSL; PK changes are blocked in alter migrations (v1).
+
+Run "wigrate <command> --help" for command-specific flags.
+`)
 }

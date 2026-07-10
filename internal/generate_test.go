@@ -53,6 +53,40 @@ type User struct {
 `, string(upSQL))
 		assert.Equal(t, "DROP TABLE IF EXISTS users;\n", string(downSQL))
 	})
+
+	t.Run("dry-run previews init migration without writing files", func(t *testing.T) {
+		// ===== Arrange ===== //
+		module := makeTestMigrationModule(t, "iam", "user.go", `package entity
+
+import "github.com/google/uuid"
+
+type User struct {
+	ID    uuid.UUID
+	Email string // 20 unique
+}
+`)
+
+		restoreDryRun := stubDryRun(t, true)
+		defer restoreDryRun()
+
+		// migrate create is a no-op under dry-run; assert it's never called for real work.
+		restoreRunCommand := stubRunCommand(t, func(cmd string, args ...string) error {
+			assert.Equal(t, "migrate", cmd)
+			assert.Equal(t, []string{"create", "-ext", "sql", "-dir", module.migrationDir, "-seq", "init_user"}, args)
+			return nil
+		})
+		defer restoreRunCommand()
+
+		// ===== Act ===== //
+		err := makeInitMigration(module, "user")
+
+		// ===== Assert ===== //
+		require.NoError(t, err)
+
+		entries, readErr := os.ReadDir(module.migrationDir)
+		require.NoError(t, readErr)
+		assert.Empty(t, entries, "dry-run must not write migration files to disk")
+	})
 }
 
 func Test_Migration_MakeAlterMigration(t *testing.T) {
@@ -389,5 +423,16 @@ func stubRunCommand(t *testing.T, stub func(cmd string, args ...string) error) f
 
 	return func() {
 		runCommandFunc = original
+	}
+}
+
+func stubDryRun(t *testing.T, value bool) func() {
+	t.Helper()
+
+	original := DryRun
+	DryRun = value
+
+	return func() {
+		DryRun = original
 	}
 }

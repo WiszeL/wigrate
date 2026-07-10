@@ -106,6 +106,16 @@ type User struct {
 | `ref:<table>` | Foreign key field | Set the referenced table (overrides convention-based table name) |
 | `del:<rule>` | Foreign key field | Set ON DELETE rule: `cascade`, `setnull`, `restrict`, `noaction` |
 
+### Field Descriptions
+
+Put human-readable descriptions in the comment **above** the field; inline trailing
+comments are DSL-only and never parsed as free text:
+
+```go
+// DPoP key thumbprint bound at login
+Thumbprint string // 100 unique
+```
+
 ### Pointer Nullability
 
 Pointer types (`*string`, `*int`, `*uuid.UUID`, etc.) default to nullable without needing `// null`. Non-pointer types default to NOT NULL. Explicit `// null` overrides on non-pointer types also works.
@@ -174,6 +184,18 @@ project-root/
 Each entity file must contain a struct whose name matches the file name in PascalCase (e.g. `user.go` → `type User struct`).
 
 The modules directory is configurable with `--modules-dir` flag (default: `"module"`).
+
+### Excluding Entities from Migration
+
+Not every entity in `internal/domain/entity/` is backed by this Postgres schema (e.g. a
+Redis-only `Session`). List its name (filename without `.go`) in a `.wigrateignore` file
+inside the module's `migration/` directory to skip it entirely — kept infra-side so the
+domain entity file itself carries no dependency on the migration tool:
+
+```
+# module/iam/migration/.wigrateignore
+session
+```
 
 ---
 

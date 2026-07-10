@@ -97,9 +97,21 @@ func makePerModule(module migrationModule, overwriteLatest bool) error {
 		return fmt.Errorf("read entity dir: %w", err)
 	}
 
+	// Entities not backed by this Postgres schema (e.g. Redis-only) opt out via
+	// migration/.wigrateignore — kept infra-side so the domain entity stays clean.
+	ignore, err := loadIgnoreSet(module.migrationDir)
+	if err != nil {
+		return err
+	}
+
 	// Generating migration per entity
 	for _, entry := range entityEntries {
 		if !isGoEntityFile(entry.Name()) {
+			continue
+		}
+
+		entityName := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
+		if _, skip := ignore[entityName]; skip {
 			continue
 		}
 
@@ -109,6 +121,28 @@ func makePerModule(module migrationModule, overwriteLatest bool) error {
 	}
 
 	return nil
+}
+
+// loadIgnoreSet reads migration/.wigrateignore — one entity name per line, blank
+// lines and #-comments skipped — into a lookup set. Missing file is not an error.
+func loadIgnoreSet(migrationDir string) (map[string]struct{}, error) {
+	data, err := os.ReadFile(filepath.Join(migrationDir, ".wigrateignore"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read .wigrateignore: %w", err)
+	}
+
+	set := make(map[string]struct{})
+	for line := range strings.SplitSeq(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		set[line] = struct{}{}
+	}
+	return set, nil
 }
 
 func generateMigrationForEntity(module migrationModule, entries []os.DirEntry, goName string, overwriteLatest bool) error {

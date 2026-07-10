@@ -3,8 +3,39 @@ package internal
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 )
+
+// createMigration runs `migrate create` and returns the resulting file pair descriptor.
+// Under --dry-run, migrate create is a no-op (see runCommandFunc), so the file is
+// synthesized here instead of rediscovered from disk — it was never written.
+func createMigration(module migrationModule, entityName string, migrationName string, kind migrationKind) (migrationFile, error) {
+	if err := runCommandFunc("migrate", "create", "-ext", "sql", "-dir", module.migrationDir, "-seq", migrationName); err != nil {
+		return migrationFile{}, err
+	}
+
+	if DryRun {
+		// ponytail: baseName lacks the real NNNNNN_ seq prefix — preview path only, never written to disk.
+		return migrationFile{
+			path:      filepath.Join(module.migrationDir, migrationName+".up.sql"),
+			baseName:  migrationName,
+			kind:      kind,
+			direction: "up",
+		}, nil
+	}
+
+	// Rediscover the file pair instead of depending on migrate CLI output.
+	latest, err := findEntityMigrationState(module, entityName)
+	if err != nil {
+		return migrationFile{}, err
+	}
+	if latest == nil || latest.kind != kind {
+		return migrationFile{}, fmt.Errorf("created %s migration for entity %s not found", kind, entityName)
+	}
+
+	return *latest, nil
+}
 
 func makeInitMigration(module migrationModule, entityName string) error {
 	// Parsing entity schema
@@ -13,21 +44,12 @@ func makeInitMigration(module migrationModule, entityName string) error {
 		return err
 	}
 
-	// Running migrate CLI
-	if err := runCommandFunc("migrate", "create", "-ext", "sql", "-dir", module.migrationDir, "-seq", "init_"+entityName); err != nil {
-		return err
-	}
-
-	// Rediscover the file pair instead of depending on migrate CLI output.
-	latest, err := findEntityMigrationState(module, entityName)
+	file, err := createMigration(module, entityName, "init_"+entityName, migrationKindInit)
 	if err != nil {
 		return err
 	}
-	if latest == nil || latest.kind != migrationKindInit {
-		return fmt.Errorf("created init migration for entity %s not found", entityName)
-	}
 
-	return writeMigrationFiles(*latest, buildCreateTableSQL(schema), buildDropTableSQL(schema))
+	return writeMigrationFiles(file, buildCreateTableSQL(schema), buildDropTableSQL(schema))
 }
 
 func overwriteLatestMigration(module migrationModule, entries []os.DirEntry, entityName string, latest migrationFile) error {
@@ -61,20 +83,12 @@ func makeAlterMigration(module migrationModule, entries []os.DirEntry, entityNam
 	// Creating new migration
 	migrationName := alterMigrationName(diff.changedColumnNames(), entityName)
 	fmt.Printf("Create new alter migration for entity %s in module %s.\n", entityName, module.name)
-	if err := runCommandFunc("migrate", "create", "-ext", "sql", "-dir", module.migrationDir, "-seq", migrationName); err != nil {
-		return err
-	}
-
-	// Fresh scan needed: migrate create just wrote new files.
-	latest, err := findEntityMigrationState(module, entityName)
+	file, err := createMigration(module, entityName, migrationName, migrationKindAlter)
 	if err != nil {
 		return err
 	}
-	if latest == nil || latest.kind != migrationKindAlter {
-		return fmt.Errorf("created alter migration for entity %s not found", entityName)
-	}
 
-	return writeMigrationFiles(*latest, buildAlterTableSQL(diff), buildRevertAlterTableSQL(diff))
+	return writeMigrationFiles(file, buildAlterTableSQL(diff), buildRevertAlterTableSQL(diff))
 }
 
 func overwriteAlterMigration(module migrationModule, entries []os.DirEntry, entityName string, latest migrationFile) error {
