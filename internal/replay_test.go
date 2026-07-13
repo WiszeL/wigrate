@@ -159,6 +159,68 @@ func TestReplayIndex(t *testing.T) {
 	})
 }
 
+func TestReplayTrgmIndex(t *testing.T) {
+	t.Run("parse", func(t *testing.T) {
+		// ===== Arrange ===== //
+		tests := []struct {
+			in  string
+			col string
+			ok  bool
+		}{
+			{"CREATE INDEX idx_notes_body_trgm ON notes USING GIN (body gin_trgm_ops)", "body", true},
+			{"bad", "", false},
+		}
+
+		for _, tt := range tests {
+			// ===== Act ===== //
+			got, ok := parseGeneratedTrgmIndex(tt.in)
+
+			// ===== Assert ===== //
+			assert.Equal(t, tt.ok, ok)
+			if ok {
+				assert.Equal(t, tt.col, got)
+			}
+		}
+	})
+
+	t.Run("round-trips CREATE INDEX ... USING GIN and DROP INDEX IF EXISTS through applyGeneratedSQL", func(t *testing.T) {
+		// ===== Arrange ===== //
+		schema := &tableSchema{name: "notes"}
+
+		// ===== Act ===== //
+		applyGeneratedSQL(schema, "CREATE EXTENSION IF NOT EXISTS pg_trgm;\nCREATE INDEX idx_notes_body_trgm ON notes USING GIN (body gin_trgm_ops);\n")
+
+		// ===== Assert ===== //
+		assert.Equal(t, []string{"body"}, schema.trgmIndexes)
+		assert.Empty(t, schema.columns, "CREATE EXTENSION line must not be parsed as a column")
+
+		// ===== Act ===== //
+		applyGeneratedSQL(schema, "DROP INDEX IF EXISTS idx_notes_body_trgm;\n")
+
+		// ===== Assert ===== //
+		assert.Empty(t, schema.trgmIndexes)
+	})
+
+	t.Run("plain index and trgm index on the same column stay independent", func(t *testing.T) {
+		// ===== Arrange ===== //
+		schema := &tableSchema{name: "notes"}
+
+		// ===== Act ===== //
+		applyGeneratedSQL(schema, "CREATE INDEX idx_notes_body ON notes (body);\nCREATE INDEX idx_notes_body_trgm ON notes USING GIN (body gin_trgm_ops);\n")
+
+		// ===== Assert ===== //
+		assert.Equal(t, [][]string{{"body"}}, schema.indexes)
+		assert.Equal(t, []string{"body"}, schema.trgmIndexes)
+
+		// ===== Act ===== //
+		applyGeneratedSQL(schema, "DROP INDEX IF EXISTS idx_notes_body_trgm;\n")
+
+		// ===== Assert ===== //
+		assert.Equal(t, [][]string{{"body"}}, schema.indexes, "dropping the trgm index must not remove the plain index")
+		assert.Empty(t, schema.trgmIndexes)
+	})
+}
+
 func TestReplayColumnAlter(t *testing.T) {
 	t.Run("apply", func(t *testing.T) {
 		// ===== Arrange ===== //

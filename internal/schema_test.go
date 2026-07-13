@@ -205,6 +205,47 @@ type Bad struct {
 		assert.Contains(t, err.Error(), "empty index group")
 	})
 
+	t.Run("parses trgm into a single-column trigram index", func(t *testing.T) {
+		// ===== Arrange ===== //
+		module := makeTestMigrationModule(t, "shop", "note.go", `package entity
+
+import "github.com/google/uuid"
+
+type Note struct {
+	ID   uuid.UUID
+	Body string // 200 unique trgm
+}
+`)
+
+		// ===== Act ===== //
+		schema, err := parseEntitySchema(module, "note")
+
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.Equal(t, []string{"body"}, schema.trgmIndexes)
+		assert.True(t, schema.columns[1].unique, "trgm combines with unique on the same field")
+	})
+
+	t.Run("rejects trgm on a non-string field", func(t *testing.T) {
+		// ===== Arrange ===== //
+		module := makeTestMigrationModule(t, "shop", "count.go", `package entity
+
+import "github.com/google/uuid"
+
+type Count struct {
+	ID    uuid.UUID
+	Total int // trgm
+}
+`)
+
+		// ===== Act ===== //
+		_, err := parseEntitySchema(module, "count")
+
+		// ===== Assert ===== //
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "trgm requires a string field")
+	})
+
 	t.Run("makes pointer field nullable by default", func(t *testing.T) {
 		// ===== Arrange ===== //
 		module := makeTestMigrationModule(t, "shop", "item.go", `package entity
@@ -577,6 +618,18 @@ func Test_Schema_ParseFieldComment(t *testing.T) {
 		// ===== Assert ===== //
 		assert.NoError(t, err)
 		assert.Equal(t, "lookup", comment.indexGroup)
+	})
+
+	t.Run("parses trgm token", func(t *testing.T) {
+		// ===== Act ===== //
+		comment, err := parseFieldComment(&ast.Field{
+			Comment: &ast.CommentGroup{
+				List: []*ast.Comment{{Text: "// trgm"}},
+			},
+		})
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.True(t, comment.trgm)
 	})
 
 	t.Run("parses length token", func(t *testing.T) {

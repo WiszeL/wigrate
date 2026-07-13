@@ -561,4 +561,33 @@ func Test_Migration_DiffSchema(t *testing.T) {
 		assert.Equal(t, [][]string{{"tenant_id", "kind"}}, diff.addedIndexes)
 		assert.Equal(t, [][]string{{"tenant_id", "happened"}}, diff.removedIndexes)
 	})
+
+	t.Run("detects added trgm index", func(t *testing.T) {
+		// ===== Arrange ===== //
+		previous := tableSchema{name: "notes"}
+		desired := tableSchema{name: "notes", trgmIndexes: []string{"body"}}
+
+		// ===== Act ===== //
+		diff, err := diffSchema(previous, desired)
+
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.Equal(t, []string{"body"}, diff.addedTrgmIndexes)
+		assert.Empty(t, diff.removedTrgmIndexes)
+		assert.False(t, diff.empty())
+	})
+
+	t.Run("detects removed trgm index", func(t *testing.T) {
+		// ===== Arrange ===== //
+		previous := tableSchema{name: "notes", trgmIndexes: []string{"body"}}
+		desired := tableSchema{name: "notes"}
+
+		// ===== Act ===== //
+		diff, err := diffSchema(previous, desired)
+
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.Equal(t, []string{"body"}, diff.removedTrgmIndexes)
+		assert.Empty(t, diff.addedTrgmIndexes)
+	})
 }

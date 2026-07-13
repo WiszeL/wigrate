@@ -18,6 +18,7 @@ type tableSchema struct {
 	primaryKey  []string   // composite PK column names, in order (empty => single/no PK, stays inline column bool)
 	uniques     [][]string // composite unique groups, each >=2 cols, in order
 	indexes     [][]string // plain (non-unique) indexes, each 1+ cols, in order; always standalone CREATE INDEX
+	trgmIndexes []string   // columns with a GIN trigram index (single-column only), in order
 }
 
 type columnSchema struct {
@@ -45,6 +46,7 @@ type fieldComment struct {
 	uniqueGroup string
 	index       bool
 	indexGroup  string
+	trgm        bool
 }
 
 // fieldIndex is the per-column index directive collected during struct field
@@ -53,6 +55,7 @@ type fieldComment struct {
 type fieldIndex struct {
 	on    bool
 	group string
+	trgm  bool
 }
 
 func parseEntitySchema(module migrationModule, entityName string) (tableSchema, error) {
@@ -157,6 +160,9 @@ func foldIndexes(schema *tableSchema, directives []fieldIndex) {
 	order := make([]string, 0)
 	indexByGroup := make(map[string][]int)
 	for i, directive := range directives {
+		if directive.trgm {
+			schema.trgmIndexes = append(schema.trgmIndexes, schema.columns[i].name)
+		}
 		if !directive.on {
 			continue
 		}
@@ -206,7 +212,7 @@ func mapStructFieldToSchema(structName string, field *ast.Field) ([]columnSchema
 		}
 		columns = append(columns, column)
 		groups = append(groups, comment.uniqueGroup)
-		indexes = append(indexes, fieldIndex{on: comment.index || comment.indexGroup != "", group: comment.indexGroup})
+		indexes = append(indexes, fieldIndex{on: comment.index || comment.indexGroup != "", group: comment.indexGroup, trgm: comment.trgm})
 
 		foreignKey, ok, err := mapFieldToForeignKey(name.Name, column, comment)
 		if err != nil {
@@ -268,6 +274,8 @@ func parseFieldComment(field *ast.Field) (fieldComment, error) {
 			comment.primary = true
 		case token == "index":
 			comment.index = true
+		case token == "trgm":
+			comment.trgm = true
 		case strings.HasPrefix(token, "ref:"):
 			comment.refTable = strings.TrimPrefix(token, "ref:")
 			if comment.refTable == "" {
@@ -340,8 +348,15 @@ func mapFieldToColumn(fieldName string, expr ast.Expr, comment fieldComment) (co
 		column.notNull = false
 		column.unique = false
 	}
+	if comment.trgm && !isStringSQLType(column.dataType) {
+		return columnSchema{}, fmt.Errorf("trgm requires a string field")
+	}
 
 	return column, nil
+}
+
+func isStringSQLType(dataType string) bool {
+	return dataType == "TEXT" || strings.HasPrefix(dataType, "VARCHAR")
 }
 
 func mapFieldToForeignKey(fieldName string, column columnSchema, comment fieldComment) (foreignKeySchema, bool, error) {

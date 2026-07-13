@@ -105,6 +105,7 @@ type User struct {
 | `unique:<group>` | Any | Group two or more fields into one composite UNIQUE constraint |
 | `index` | Any | Add a plain (non-unique) index, emitted as a standalone `CREATE INDEX` statement |
 | `index:<group>` | Any | Group two or more fields into one composite index |
+| `trgm` | `string` | Add a GIN trigram index for fuzzy/`ILIKE '%x%'` search |
 | `pk` | Any | Mark as PRIMARY KEY (overrides default ID→PK behavior). Two or more `pk` fields form a composite PRIMARY KEY |
 | `ref:<table>` | Foreign key field | Set the referenced table (overrides convention-based table name) |
 | `del:<rule>` | Foreign key field | Set ON DELETE rule: `cascade`, `setnull`, `restrict`, `noaction` |
@@ -158,6 +159,33 @@ CREATE INDEX idx_users_email ON users (email);
 ```
 
 Indexes can be added/removed freely via alter migrations.
+
+### Trigram Indexes
+
+`trgm` adds a GIN trigram index on a `string` field, for fuzzy/`ILIKE '%x%'` search.
+Rejected on non-string fields. Like `index`, it's always a standalone statement:
+
+```go
+Username string // 25 unique trgm
+```
+
+```sql
+CREATE TABLE users (
+    username VARCHAR(25) NOT NULL UNIQUE
+);
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE INDEX idx_users_username_trgm ON users USING GIN (username gin_trgm_ops);
+```
+
+`CREATE EXTENSION IF NOT EXISTS pg_trgm` is idempotent and DB-global — emitted once per
+migration file (not once per column), regardless of how many `trgm` fields it contains.
+
+Down migration only drops the index, never the extension — other columns/tables may
+still depend on it:
+
+```sql
+DROP INDEX IF EXISTS idx_users_username_trgm;
+```
 
 ### Field Descriptions
 

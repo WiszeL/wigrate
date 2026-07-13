@@ -88,12 +88,18 @@ func applyGeneratedSQL(schema *tableSchema, sql string) {
 			constraintName := strings.TrimPrefix(line, "DROP CONSTRAINT IF EXISTS ")
 			removeForeignKeyByConstraintName(schema, constraintName)
 			removeUniqueByConstraintName(schema, constraintName)
+		case strings.HasPrefix(line, "CREATE INDEX ") && strings.Contains(line, "USING GIN"):
+			if col, ok := parseGeneratedTrgmIndex(line); ok {
+				applyGeneratedTrgmIndex(schema, col)
+			}
 		case strings.HasPrefix(line, "CREATE INDEX "):
 			if cols, ok := parseGeneratedIndex(line); ok {
 				applyGeneratedIndex(schema, cols)
 			}
 		case strings.HasPrefix(line, "DROP INDEX IF EXISTS "):
-			removeIndexByName(schema, strings.TrimPrefix(line, "DROP INDEX IF EXISTS "))
+			name := strings.TrimPrefix(line, "DROP INDEX IF EXISTS ")
+			removeIndexByName(schema, name)
+			removeTrgmIndexByName(schema, name)
 		case strings.HasPrefix(line, "ADD COLUMN "):
 			if column, ok := parseGeneratedColumn(strings.TrimPrefix(line, "ADD COLUMN ")); ok {
 				appendColumnIfMissing(schema, column)
@@ -122,6 +128,7 @@ func shouldSkipGeneratedSQLLine(line string) bool {
 	return line == "" ||
 		strings.HasPrefix(line, "CREATE TABLE ") ||
 		strings.HasPrefix(line, "ALTER TABLE ") ||
+		strings.HasPrefix(line, "CREATE EXTENSION ") ||
 		line == ")"
 }
 
@@ -206,6 +213,21 @@ func parseGeneratedIndex(line string) ([]string, bool) {
 	}
 
 	return parseGeneratedColumnList(line[parenStart:])
+}
+
+// parseGeneratedTrgmIndex extracts the column from "CREATE INDEX idx_..._trgm ON table USING GIN (col gin_trgm_ops)".
+func parseGeneratedTrgmIndex(line string) (string, bool) {
+	_, after, ok := strings.Cut(line, "(")
+	if !ok {
+		return "", false
+	}
+	inner := strings.TrimSuffix(strings.TrimSpace(after), ")")
+	col, _, ok := strings.Cut(inner, " ")
+	if !ok || col == "" {
+		return "", false
+	}
+
+	return col, true
 }
 
 func parseGeneratedAlterForeignKey(line string) (foreignKeySchema, bool) {
@@ -355,6 +377,24 @@ func removeIndexByName(schema *tableSchema, name string) {
 		return indexName(schema.name, cols) == name
 	}); i >= 0 {
 		schema.indexes = slices.Delete(schema.indexes, i, i+1)
+	}
+}
+
+func applyGeneratedTrgmIndex(schema *tableSchema, column string) {
+	name := trgmIndexName(schema.name, column)
+	for _, existing := range schema.trgmIndexes {
+		if trgmIndexName(schema.name, existing) == name {
+			return
+		}
+	}
+	schema.trgmIndexes = append(schema.trgmIndexes, column)
+}
+
+func removeTrgmIndexByName(schema *tableSchema, name string) {
+	if i := slices.IndexFunc(schema.trgmIndexes, func(col string) bool {
+		return trgmIndexName(schema.name, col) == name
+	}); i >= 0 {
+		schema.trgmIndexes = slices.Delete(schema.trgmIndexes, i, i+1)
 	}
 }
 

@@ -185,6 +185,8 @@ Entity field comment DSL (inline, trailing comment only):
   unique:<group>  group 2+ fields sharing the same <group> label into one composite UNIQUE constraint
   index           add a plain (non-unique) index, as a standalone CREATE INDEX statement
   index:<group>   group 2+ fields sharing the same <group> label into one composite index
+  trgm            string fields only: GIN trigram index for fuzzy/ILIKE substring search
+                  (emits CREATE EXTENSION IF NOT EXISTS pg_trgm once per file, never dropped)
   pk              mark PRIMARY KEY (default: field named ID); 2+ pk fields form a composite PRIMARY KEY
   ref:<table>     foreign key target table (default: derived from "<Name>ID" field -> snake_case, pluralized)
   del:<rule>      ON DELETE rule for a foreign key: cascade | setnull | restrict | noaction
@@ -197,6 +199,7 @@ Naming conventions:
   Struct/field PascalCase -> table/column snake_case, table names pluralized.
   FK column: fk_<table>_<refTable>. Unique constraint: uq_<table>_<column1>_<column2>...
   Index: idx_<table>_<column1>_<column2>...
+  Trigram index: idx_<table>_<column>_trgm
 
 Supported Go types: string, int, int32, int64, bool, float32, float64, time.Time, uuid.UUID.
 Limitations: no default-value DSL; PK changes (single or composite) are blocked in alter

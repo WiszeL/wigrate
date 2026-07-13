@@ -19,6 +19,8 @@ type schemaDiff struct {
 	removedUniques     [][]string
 	addedIndexes       [][]string
 	removedIndexes     [][]string
+	addedTrgmIndexes   []string
+	removedTrgmIndexes []string
 }
 
 type columnChange struct {
@@ -129,7 +131,32 @@ func diffSchema(previous tableSchema, desired tableSchema) (schemaDiff, error) {
 		}
 	}
 
+	// Trigram indexes, keyed by their own name (idx_<table>_<col>_trgm) so they never
+	// collide with a plain index on the same column.
+	previousTrgmNames := trgmNameSet(desired.name, previous.trgmIndexes)
+	desiredTrgmNames := trgmNameSet(desired.name, desired.trgmIndexes)
+
+	for _, col := range desired.trgmIndexes {
+		if _, ok := previousTrgmNames[trgmIndexName(desired.name, col)]; !ok {
+			diff.addedTrgmIndexes = append(diff.addedTrgmIndexes, col)
+		}
+	}
+	for _, col := range previous.trgmIndexes {
+		if _, ok := desiredTrgmNames[trgmIndexName(desired.name, col)]; !ok {
+			diff.removedTrgmIndexes = append(diff.removedTrgmIndexes, col)
+		}
+	}
+
 	return diff, nil
+}
+
+func trgmNameSet(tableName string, columns []string) map[string]struct{} {
+	names := make(map[string]struct{}, len(columns))
+	for _, col := range columns {
+		names[trgmIndexName(tableName, col)] = struct{}{}
+	}
+
+	return names
 }
 
 func uniqueNameSet(tableName string, uniques [][]string) map[string]struct{} {
@@ -160,7 +187,9 @@ func (diff schemaDiff) empty() bool {
 		len(diff.addedUniques) == 0 &&
 		len(diff.removedUniques) == 0 &&
 		len(diff.addedIndexes) == 0 &&
-		len(diff.removedIndexes) == 0
+		len(diff.removedIndexes) == 0 &&
+		len(diff.addedTrgmIndexes) == 0 &&
+		len(diff.removedTrgmIndexes) == 0
 }
 
 func (diff schemaDiff) changedColumnNames() []string {
@@ -204,6 +233,12 @@ func (diff schemaDiff) changedColumnNames() []string {
 	}
 	for _, cols := range diff.removedIndexes {
 		appendName(strings.Join(cols, "_"))
+	}
+	for _, col := range diff.addedTrgmIndexes {
+		appendName(col)
+	}
+	for _, col := range diff.removedTrgmIndexes {
+		appendName(col)
 	}
 
 	return names

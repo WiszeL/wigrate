@@ -167,6 +167,14 @@ func buildCreateTableSQL(schema tableSchema) string {
 		statements = append(statements, createIndexStmt(schema.name, cols))
 	}
 
+	// Trigram indexes: extension goes once per file, ahead of the indexes that need it.
+	if len(schema.trgmIndexes) > 0 {
+		statements = append(statements, createTrgmExtensionStmt)
+		for _, col := range schema.trgmIndexes {
+			statements = append(statements, createTrgmIndexStmt(schema.name, col))
+		}
+	}
+
 	return strings.Join(statements, "\n") + "\n"
 }
 
@@ -186,6 +194,15 @@ func buildAlterTableSQL(diff schemaDiff) string {
 	for _, cols := range diff.addedIndexes {
 		statements = append(statements, createIndexStmt(diff.tableName, cols))
 	}
+	for _, col := range diff.removedTrgmIndexes {
+		statements = append(statements, dropTrgmIndexStmt(diff.tableName, col))
+	}
+	if len(diff.addedTrgmIndexes) > 0 {
+		statements = append(statements, createTrgmExtensionStmt)
+		for _, col := range diff.addedTrgmIndexes {
+			statements = append(statements, createTrgmIndexStmt(diff.tableName, col))
+		}
+	}
 
 	return strings.Join(statements, "\n") + "\n"
 }
@@ -197,6 +214,15 @@ func buildRevertAlterTableSQL(diff schemaDiff) string {
 	}
 	for i := len(diff.removedIndexes) - 1; i >= 0; i-- {
 		statements = append(statements, createIndexStmt(diff.tableName, diff.removedIndexes[i]))
+	}
+	for i := len(diff.addedTrgmIndexes) - 1; i >= 0; i-- {
+		statements = append(statements, dropTrgmIndexStmt(diff.tableName, diff.addedTrgmIndexes[i]))
+	}
+	if len(diff.removedTrgmIndexes) > 0 {
+		statements = append(statements, createTrgmExtensionStmt)
+		for i := len(diff.removedTrgmIndexes) - 1; i >= 0; i-- {
+			statements = append(statements, createTrgmIndexStmt(diff.tableName, diff.removedTrgmIndexes[i]))
+		}
 	}
 
 	return strings.Join(statements, "\n") + "\n"
@@ -416,4 +442,21 @@ func createIndexStmt(tableName string, columns []string) string {
 // dropIndexStmt takes the index name only — Postgres index names are schema-scoped, not table-scoped.
 func dropIndexStmt(tableName string, columns []string) string {
 	return "DROP INDEX IF EXISTS " + indexName(tableName, columns) + ";"
+}
+
+// createTrgmExtensionStmt is emitted at most once per migration file — the extension is
+// DB-global, not per-table, so this is idempotent and never repeated per column.
+const createTrgmExtensionStmt = "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
+
+func trgmIndexName(tableName string, column string) string {
+	return "idx_" + tableName + "_" + column + "_trgm"
+}
+
+func createTrgmIndexStmt(tableName string, column string) string {
+	return "CREATE INDEX " + trgmIndexName(tableName, column) + " ON " + tableName + " USING GIN (" + column + " gin_trgm_ops);"
+}
+
+// dropTrgmIndexStmt never drops the extension — other columns/tables may still depend on it.
+func dropTrgmIndexStmt(tableName string, column string) string {
+	return "DROP INDEX IF EXISTS " + trgmIndexName(tableName, column) + ";"
 }

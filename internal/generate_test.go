@@ -620,3 +620,93 @@ type Article struct {
 		assert.Equal(t, "DROP INDEX IF EXISTS idx_articles_title;\n", string(downSQL))
 	})
 }
+
+func Test_Migration_MakeInitMigrationTrgm(t *testing.T) {
+	t.Run("creates init migration with extension once plus GIN index", func(t *testing.T) {
+		// ===== Arrange ===== //
+		module := makeTestMigrationModule(t, "shop", "note.go", `package entity
+
+import "github.com/google/uuid"
+
+type Note struct {
+	ID    uuid.UUID
+	Title string // 100 trgm
+	Body  string // trgm
+}
+`)
+
+		restoreRunCommand := stubRunCommand(t, func(cmd string, args ...string) error {
+			upPath := filepath.Join(module.migrationDir, "000001_init_note.up.sql")
+			downPath := filepath.Join(module.migrationDir, "000001_init_note.down.sql")
+			assert.NoError(t, os.WriteFile(upPath, []byte(""), 0644))
+			assert.NoError(t, os.WriteFile(downPath, []byte(""), 0644))
+			return nil
+		})
+		defer restoreRunCommand()
+
+		// ===== Act ===== //
+		err := makeInitMigration(module, "note")
+
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+
+		upSQL, err := os.ReadFile(filepath.Join(module.migrationDir, "000001_init_note.up.sql"))
+		assert.NoError(t, err)
+
+		assert.Equal(t, `CREATE TABLE notes (
+    id UUID PRIMARY KEY,
+    title VARCHAR(100) NOT NULL,
+    body TEXT NOT NULL
+);
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE INDEX idx_notes_title_trgm ON notes USING GIN (title gin_trgm_ops);
+CREATE INDEX idx_notes_body_trgm ON notes USING GIN (body gin_trgm_ops);
+`, string(upSQL))
+	})
+}
+
+func Test_Migration_MakeAlterMigrationTrgmOnly(t *testing.T) {
+	t.Run("trgm-only add emits extension once plus standalone GIN index, down never drops extension", func(t *testing.T) {
+		// ===== Arrange ===== //
+		module := makeTestMigrationModule(t, "shop", "note.go", `package entity
+
+import "github.com/google/uuid"
+
+type Note struct {
+	ID    uuid.UUID
+	Title string // 100 trgm
+}
+`)
+		assert.NoError(t, os.WriteFile(filepath.Join(module.migrationDir, "000001_init_note.up.sql"), []byte(`CREATE TABLE notes (
+    id UUID PRIMARY KEY,
+    title VARCHAR(100) NOT NULL
+);
+`), 0644))
+		assert.NoError(t, os.WriteFile(filepath.Join(module.migrationDir, "000001_init_note.down.sql"), []byte("DROP TABLE IF EXISTS notes;\n"), 0644))
+
+		restoreRunCommand := stubRunCommand(t, func(cmd string, args ...string) error {
+			upPath := filepath.Join(module.migrationDir, "000002_alter_title_note.up.sql")
+			downPath := filepath.Join(module.migrationDir, "000002_alter_title_note.down.sql")
+			assert.NoError(t, os.WriteFile(upPath, []byte(""), 0644))
+			assert.NoError(t, os.WriteFile(downPath, []byte(""), 0644))
+			return nil
+		})
+		defer restoreRunCommand()
+
+		// ===== Act ===== //
+		entries, err := os.ReadDir(module.migrationDir)
+		require.NoError(t, err)
+		err = makeAlterMigration(module, entries, "note")
+
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+
+		upSQL, err := os.ReadFile(filepath.Join(module.migrationDir, "000002_alter_title_note.up.sql"))
+		assert.NoError(t, err)
+		downSQL, err := os.ReadFile(filepath.Join(module.migrationDir, "000002_alter_title_note.down.sql"))
+		assert.NoError(t, err)
+
+		assert.Equal(t, "CREATE EXTENSION IF NOT EXISTS pg_trgm;\nCREATE INDEX idx_notes_title_trgm ON notes USING GIN (title gin_trgm_ops);\n", string(upSQL))
+		assert.Equal(t, "DROP INDEX IF EXISTS idx_notes_title_trgm;\n", string(downSQL))
+	})
+}
