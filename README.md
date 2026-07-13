@@ -103,6 +103,8 @@ type User struct {
 | `null` | Any | Column is nullable (omit NOT NULL) |
 | `unique` | Any | Add UNIQUE constraint |
 | `unique:<group>` | Any | Group two or more fields into one composite UNIQUE constraint |
+| `index` | Any | Add a plain (non-unique) index, emitted as a standalone `CREATE INDEX` statement |
+| `index:<group>` | Any | Group two or more fields into one composite index |
 | `pk` | Any | Mark as PRIMARY KEY (overrides default ID→PK behavior). Two or more `pk` fields form a composite PRIMARY KEY |
 | `ref:<table>` | Foreign key field | Set the referenced table (overrides convention-based table name) |
 | `del:<rule>` | Foreign key field | Set ON DELETE rule: `cascade`, `setnull`, `restrict`, `noaction` |
@@ -136,6 +138,26 @@ CREATE TABLE memberships (
 Composite UNIQUE can be added/removed via alter migrations like any other constraint.
 Composite PRIMARY KEY, like single-column PK, can only be set at CREATE TABLE time —
 changing it later is blocked in alter migrations (see Limitations).
+
+### Indexes
+
+`index` (single-column) and `index:<group>` (composite, same grouping rule as
+`unique:<group>`) add a plain, non-unique index. Unlike UNIQUE, an index is not a
+table constraint — it's always emitted as its own `CREATE INDEX` / `DROP INDEX IF EXISTS`
+statement, never inline in `CREATE TABLE` or nested inside `ALTER TABLE`:
+
+```go
+Email string // 100 index
+```
+
+```sql
+CREATE TABLE users (
+    email VARCHAR(100) NOT NULL
+);
+CREATE INDEX idx_users_email ON users (email);
+```
+
+Indexes can be added/removed freely via alter migrations.
 
 ### Field Descriptions
 
@@ -180,6 +202,7 @@ RoleID uuid.UUID // ref:roles del:noaction   → ON DELETE NO ACTION
 | Foreign key | Field ending in `ID` | `RoleID` → FK to `roles(id)` |
 | FK constraint name | `fk_<table>_<refTable>` | `fk_users_roles` |
 | Unique constraint name | `uq_<table>_<column>` | `uq_users_email` |
+| Index name | `idx_<table>_<column>` | `idx_users_email` |
 
 ### Pluralization Rules
 

@@ -518,4 +518,47 @@ func Test_Migration_DiffSchema(t *testing.T) {
 		assert.Equal(t, [][]string{{"team", "role"}}, diff.addedUniques)
 		assert.Equal(t, [][]string{{"team", "user"}}, diff.removedUniques)
 	})
+
+	t.Run("detects added index", func(t *testing.T) {
+		// ===== Arrange ===== //
+		previous := tableSchema{name: "users"}
+		desired := tableSchema{name: "users", indexes: [][]string{{"email"}}}
+
+		// ===== Act ===== //
+		diff, err := diffSchema(previous, desired)
+
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.Equal(t, [][]string{{"email"}}, diff.addedIndexes)
+		assert.Empty(t, diff.removedIndexes)
+		assert.False(t, diff.empty())
+	})
+
+	t.Run("detects removed index", func(t *testing.T) {
+		// ===== Arrange ===== //
+		previous := tableSchema{name: "users", indexes: [][]string{{"email"}}}
+		desired := tableSchema{name: "users"}
+
+		// ===== Act ===== //
+		diff, err := diffSchema(previous, desired)
+
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.Equal(t, [][]string{{"email"}}, diff.removedIndexes)
+		assert.Empty(t, diff.addedIndexes)
+	})
+
+	t.Run("column-set change on a composite index diffs as remove+add", func(t *testing.T) {
+		// ===== Arrange ===== //
+		previous := tableSchema{name: "events", indexes: [][]string{{"tenant_id", "happened"}}}
+		desired := tableSchema{name: "events", indexes: [][]string{{"tenant_id", "kind"}}}
+
+		// ===== Act ===== //
+		diff, err := diffSchema(previous, desired)
+
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.Equal(t, [][]string{{"tenant_id", "kind"}}, diff.addedIndexes)
+		assert.Equal(t, [][]string{{"tenant_id", "happened"}}, diff.removedIndexes)
+	})
 }

@@ -115,6 +115,50 @@ func TestReplayUniqueConstraint(t *testing.T) {
 	})
 }
 
+func TestReplayIndex(t *testing.T) {
+	t.Run("parse", func(t *testing.T) {
+		// ===== Arrange ===== //
+		tests := []struct {
+			in   string
+			cols []string
+			ok   bool
+		}{
+			{"CREATE INDEX idx_users_email ON users (email)", []string{"email"}, true},
+			{"CREATE INDEX idx_events_tenant_id_happened ON events (tenant_id, happened)", []string{"tenant_id", "happened"}, true},
+			{"CREATE INDEX idx_users_email ON users ()", nil, false},
+			{"bad", nil, false},
+		}
+
+		for _, tt := range tests {
+			// ===== Act ===== //
+			got, ok := parseGeneratedIndex(tt.in)
+
+			// ===== Assert ===== //
+			assert.Equal(t, tt.ok, ok)
+			if ok {
+				assert.Equal(t, tt.cols, got)
+			}
+		}
+	})
+
+	t.Run("round-trips CREATE INDEX and DROP INDEX IF EXISTS through applyGeneratedSQL", func(t *testing.T) {
+		// ===== Arrange ===== //
+		schema := &tableSchema{name: "users"}
+
+		// ===== Act ===== //
+		applyGeneratedSQL(schema, "CREATE INDEX idx_users_email ON users (email);\n")
+
+		// ===== Assert ===== //
+		assert.Equal(t, [][]string{{"email"}}, schema.indexes)
+
+		// ===== Act ===== //
+		applyGeneratedSQL(schema, "DROP INDEX IF EXISTS idx_users_email;\n")
+
+		// ===== Assert ===== //
+		assert.Empty(t, schema.indexes)
+	})
+}
+
 func TestReplayColumnAlter(t *testing.T) {
 	t.Run("apply", func(t *testing.T) {
 		// ===== Arrange ===== //

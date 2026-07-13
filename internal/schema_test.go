@@ -140,6 +140,71 @@ type Solo struct {
 		assert.Empty(t, schema.uniques)
 	})
 
+	t.Run("parses bare index into a single-column index", func(t *testing.T) {
+		// ===== Arrange ===== //
+		module := makeTestMigrationModule(t, "shop", "article.go", `package entity
+
+import "github.com/google/uuid"
+
+type Article struct {
+	ID    uuid.UUID
+	Title string // 100 index
+}
+`)
+
+		// ===== Act ===== //
+		schema, err := parseEntitySchema(module, "article")
+
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.Equal(t, [][]string{{"title"}}, schema.indexes)
+	})
+
+	t.Run("folds index:<group> into a composite index", func(t *testing.T) {
+		// ===== Arrange ===== //
+		module := makeTestMigrationModule(t, "shop", "event.go", `package entity
+
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
+
+type Event struct {
+	ID       uuid.UUID
+	TenantID uuid.UUID // index:lookup
+	Happened time.Time // index:lookup
+}
+`)
+
+		// ===== Act ===== //
+		schema, err := parseEntitySchema(module, "event")
+
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.Equal(t, [][]string{{"tenant_id", "happened"}}, schema.indexes)
+	})
+
+	t.Run("rejects empty index group", func(t *testing.T) {
+		// ===== Arrange ===== //
+		module := makeTestMigrationModule(t, "shop", "bad.go", `package entity
+
+import "github.com/google/uuid"
+
+type Bad struct {
+	ID   uuid.UUID
+	Code string // index:
+}
+`)
+
+		// ===== Act ===== //
+		_, err := parseEntitySchema(module, "bad")
+
+		// ===== Assert ===== //
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "empty index group")
+	})
+
 	t.Run("makes pointer field nullable by default", func(t *testing.T) {
 		// ===== Arrange ===== //
 		module := makeTestMigrationModule(t, "shop", "item.go", `package entity
@@ -488,6 +553,30 @@ func Test_Schema_ParseFieldComment(t *testing.T) {
 		// ===== Assert ===== //
 		assert.NoError(t, err)
 		assert.True(t, comment.unique)
+	})
+
+	t.Run("parses index token", func(t *testing.T) {
+		// ===== Act ===== //
+		comment, err := parseFieldComment(&ast.Field{
+			Comment: &ast.CommentGroup{
+				List: []*ast.Comment{{Text: "// index"}},
+			},
+		})
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.True(t, comment.index)
+	})
+
+	t.Run("parses index group", func(t *testing.T) {
+		// ===== Act ===== //
+		comment, err := parseFieldComment(&ast.Field{
+			Comment: &ast.CommentGroup{
+				List: []*ast.Comment{{Text: "// index:lookup"}},
+			},
+		})
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.Equal(t, "lookup", comment.indexGroup)
 	})
 
 	t.Run("parses length token", func(t *testing.T) {

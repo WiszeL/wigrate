@@ -88,6 +88,12 @@ func applyGeneratedSQL(schema *tableSchema, sql string) {
 			constraintName := strings.TrimPrefix(line, "DROP CONSTRAINT IF EXISTS ")
 			removeForeignKeyByConstraintName(schema, constraintName)
 			removeUniqueByConstraintName(schema, constraintName)
+		case strings.HasPrefix(line, "CREATE INDEX "):
+			if cols, ok := parseGeneratedIndex(line); ok {
+				applyGeneratedIndex(schema, cols)
+			}
+		case strings.HasPrefix(line, "DROP INDEX IF EXISTS "):
+			removeIndexByName(schema, strings.TrimPrefix(line, "DROP INDEX IF EXISTS "))
 		case strings.HasPrefix(line, "ADD COLUMN "):
 			if column, ok := parseGeneratedColumn(strings.TrimPrefix(line, "ADD COLUMN ")); ok {
 				appendColumnIfMissing(schema, column)
@@ -192,6 +198,16 @@ func parseGeneratedColumnList(text string) ([]string, bool) {
 	return columns, len(columns) > 0
 }
 
+// parseGeneratedIndex extracts the column list from "CREATE INDEX idx_... ON table (a, b)".
+func parseGeneratedIndex(line string) ([]string, bool) {
+	parenStart := strings.Index(line, "(")
+	if parenStart == -1 {
+		return nil, false
+	}
+
+	return parseGeneratedColumnList(line[parenStart:])
+}
+
 func parseGeneratedAlterForeignKey(line string) (foreignKeySchema, bool) {
 	parts := strings.SplitN(line, " FOREIGN KEY ", 2)
 	if len(parts) != 2 {
@@ -293,6 +309,16 @@ func applyGeneratedUniqueConstraint(schema *tableSchema, columns []string) {
 	schema.uniques = append(schema.uniques, columns)
 }
 
+func applyGeneratedIndex(schema *tableSchema, columns []string) {
+	name := indexName(schema.name, columns)
+	for _, existing := range schema.indexes {
+		if indexName(schema.name, existing) == name {
+			return
+		}
+	}
+	schema.indexes = append(schema.indexes, columns)
+}
+
 func appendForeignKeyIfMissing(schema *tableSchema, foreignKey foreignKeySchema) {
 	if slices.IndexFunc(schema.foreignKeys, func(fk foreignKeySchema) bool { return fk.column == foreignKey.column }) >= 0 {
 		return
@@ -321,6 +347,14 @@ func removeUniqueByConstraintName(schema *tableSchema, constraintName string) {
 		return uniqueConstraintName(schema.name, cols...) == constraintName
 	}); i >= 0 {
 		schema.uniques = slices.Delete(schema.uniques, i, i+1)
+	}
+}
+
+func removeIndexByName(schema *tableSchema, name string) {
+	if i := slices.IndexFunc(schema.indexes, func(cols []string) bool {
+		return indexName(schema.name, cols) == name
+	}); i >= 0 {
+		schema.indexes = slices.Delete(schema.indexes, i, i+1)
 	}
 }
 

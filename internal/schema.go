@@ -17,6 +17,7 @@ type tableSchema struct {
 	foreignKeys []foreignKeySchema
 	primaryKey  []string   // composite PK column names, in order (empty => single/no PK, stays inline column bool)
 	uniques     [][]string // composite unique groups, each >=2 cols, in order
+	indexes     [][]string // plain (non-unique) indexes, each 1+ cols, in order; always standalone CREATE INDEX
 }
 
 type columnSchema struct {
@@ -42,6 +43,16 @@ type fieldComment struct {
 	refTable    string
 	deleteRule  string
 	uniqueGroup string
+	index       bool
+	indexGroup  string
+}
+
+// fieldIndex is the per-column index directive collected during struct field
+// mapping, parallel to schema.columns. on=false means no index; group=="" is
+// a bare single-column index; a non-empty group folds into one composite index.
+type fieldIndex struct {
+	on    bool
+	group string
 }
 
 func parseEntitySchema(module migrationModule, entityName string) (tableSchema, error) {
@@ -65,14 +76,16 @@ func parseEntitySchema(module migrationModule, entityName string) (tableSchema, 
 
 	// Mapping fields to table schema
 	var uniqueGroups []string // parallel to schema.columns; "" = no group
+	var indexDirectives []fieldIndex
 	for _, field := range structType.Fields.List {
-		columns, foreignKeys, groups, err := mapStructFieldToSchema(structName, field)
+		columns, foreignKeys, groups, indexes, err := mapStructFieldToSchema(structName, field)
 		if err != nil {
 			return tableSchema{}, err
 		}
 		schema.columns = append(schema.columns, columns...)
 		schema.foreignKeys = append(schema.foreignKeys, foreignKeys...)
 		uniqueGroups = append(uniqueGroups, groups...)
+		indexDirectives = append(indexDirectives, indexes...)
 	}
 
 	if len(schema.columns) == 0 {
@@ -81,6 +94,7 @@ func parseEntitySchema(module migrationModule, entityName string) (tableSchema, 
 
 	foldCompositePrimaryKey(&schema)
 	foldCompositeUniques(&schema, uniqueGroups)
+	foldIndexes(&schema, indexDirectives)
 
 	return schema, nil
 }
@@ -136,21 +150,51 @@ func foldCompositeUniques(schema *tableSchema, groups []string) {
 	}
 }
 
-func mapStructFieldToSchema(structName string, field *ast.Field) ([]columnSchema, []foreignKeySchema, []string, error) {
+// foldIndexes groups columns sharing an `index:<group>` label into table-level
+// composite indexes; a bare `index` (group=="") becomes its own single-column
+// index. Unlike UNIQUE, indexes never degrade to an inline column bool.
+func foldIndexes(schema *tableSchema, directives []fieldIndex) {
+	order := make([]string, 0)
+	indexByGroup := make(map[string][]int)
+	for i, directive := range directives {
+		if !directive.on {
+			continue
+		}
+		if directive.group == "" {
+			schema.indexes = append(schema.indexes, []string{schema.columns[i].name})
+			continue
+		}
+		if _, ok := indexByGroup[directive.group]; !ok {
+			order = append(order, directive.group)
+		}
+		indexByGroup[directive.group] = append(indexByGroup[directive.group], i)
+	}
+
+	for _, group := range order {
+		var cols []string
+		for _, i := range indexByGroup[group] {
+			cols = append(cols, schema.columns[i].name)
+		}
+		schema.indexes = append(schema.indexes, cols)
+	}
+}
+
+func mapStructFieldToSchema(structName string, field *ast.Field) ([]columnSchema, []foreignKeySchema, []string, []fieldIndex, error) {
 	if len(field.Names) == 0 {
-		return nil, nil, nil, fmt.Errorf("%s: embedded fields are not supported", structName)
+		return nil, nil, nil, nil, fmt.Errorf("%s: embedded fields are not supported", structName)
 	}
 
 	// Parsing the field comment
 	comment, err := parseFieldComment(field)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("%s: %w", structName, err)
+		return nil, nil, nil, nil, fmt.Errorf("%s: %w", structName, err)
 	}
 
 	// Mapping exported fields to columns and FKs
 	var columns []columnSchema
 	var foreignKeys []foreignKeySchema
 	var groups []string
+	var indexes []fieldIndex
 	for _, name := range field.Names {
 		if !name.IsExported() {
 			continue
@@ -158,21 +202,22 @@ func mapStructFieldToSchema(structName string, field *ast.Field) ([]columnSchema
 
 		column, err := mapFieldToColumn(name.Name, field.Type, comment)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("%s.%s: %w", structName, name.Name, err)
+			return nil, nil, nil, nil, fmt.Errorf("%s.%s: %w", structName, name.Name, err)
 		}
 		columns = append(columns, column)
 		groups = append(groups, comment.uniqueGroup)
+		indexes = append(indexes, fieldIndex{on: comment.index || comment.indexGroup != "", group: comment.indexGroup})
 
 		foreignKey, ok, err := mapFieldToForeignKey(name.Name, column, comment)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("%s.%s: %w", structName, name.Name, err)
+			return nil, nil, nil, nil, fmt.Errorf("%s.%s: %w", structName, name.Name, err)
 		}
 		if ok {
 			foreignKeys = append(foreignKeys, foreignKey)
 		}
 	}
 
-	return columns, foreignKeys, groups, nil
+	return columns, foreignKeys, groups, indexes, nil
 }
 
 // findStruct locates a struct whose snake_case name matches entityName.
@@ -221,6 +266,8 @@ func parseFieldComment(field *ast.Field) (fieldComment, error) {
 			comment.unique = true
 		case token == "pk":
 			comment.primary = true
+		case token == "index":
+			comment.index = true
 		case strings.HasPrefix(token, "ref:"):
 			comment.refTable = strings.TrimPrefix(token, "ref:")
 			if comment.refTable == "" {
@@ -230,6 +277,11 @@ func parseFieldComment(field *ast.Field) (fieldComment, error) {
 			comment.uniqueGroup = strings.TrimPrefix(token, "unique:")
 			if comment.uniqueGroup == "" {
 				return fieldComment{}, fmt.Errorf("empty unique group")
+			}
+		case strings.HasPrefix(token, "index:"):
+			comment.indexGroup = strings.TrimPrefix(token, "index:")
+			if comment.indexGroup == "" {
+				return fieldComment{}, fmt.Errorf("empty index group")
 			}
 		case strings.HasPrefix(token, "del:"):
 			rule, err := normalizeDeleteRule(strings.TrimPrefix(token, "del:"))

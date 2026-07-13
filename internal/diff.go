@@ -17,6 +17,8 @@ type schemaDiff struct {
 	changedForeignKeys []foreignKeyChange
 	addedUniques       [][]string
 	removedUniques     [][]string
+	addedIndexes       [][]string
+	removedIndexes     [][]string
 }
 
 type columnChange struct {
@@ -112,6 +114,21 @@ func diffSchema(previous tableSchema, desired tableSchema) (schemaDiff, error) {
 		}
 	}
 
+	// Plain indexes, keyed by their constraint-style name (same rationale as uniques).
+	previousIndexNames := indexNameSet(desired.name, previous.indexes)
+	desiredIndexNames := indexNameSet(desired.name, desired.indexes)
+
+	for _, cols := range desired.indexes {
+		if _, ok := previousIndexNames[indexName(desired.name, cols)]; !ok {
+			diff.addedIndexes = append(diff.addedIndexes, cols)
+		}
+	}
+	for _, cols := range previous.indexes {
+		if _, ok := desiredIndexNames[indexName(desired.name, cols)]; !ok {
+			diff.removedIndexes = append(diff.removedIndexes, cols)
+		}
+	}
+
 	return diff, nil
 }
 
@@ -119,6 +136,15 @@ func uniqueNameSet(tableName string, uniques [][]string) map[string]struct{} {
 	names := make(map[string]struct{}, len(uniques))
 	for _, cols := range uniques {
 		names[uniqueConstraintName(tableName, cols...)] = struct{}{}
+	}
+
+	return names
+}
+
+func indexNameSet(tableName string, indexes [][]string) map[string]struct{} {
+	names := make(map[string]struct{}, len(indexes))
+	for _, cols := range indexes {
+		names[indexName(tableName, cols)] = struct{}{}
 	}
 
 	return names
@@ -132,7 +158,9 @@ func (diff schemaDiff) empty() bool {
 		len(diff.removedForeignKeys) == 0 &&
 		len(diff.changedForeignKeys) == 0 &&
 		len(diff.addedUniques) == 0 &&
-		len(diff.removedUniques) == 0
+		len(diff.removedUniques) == 0 &&
+		len(diff.addedIndexes) == 0 &&
+		len(diff.removedIndexes) == 0
 }
 
 func (diff schemaDiff) changedColumnNames() []string {
@@ -169,6 +197,12 @@ func (diff schemaDiff) changedColumnNames() []string {
 		appendName(strings.Join(cols, "_"))
 	}
 	for _, cols := range diff.removedUniques {
+		appendName(strings.Join(cols, "_"))
+	}
+	for _, cols := range diff.addedIndexes {
+		appendName(strings.Join(cols, "_"))
+	}
+	for _, cols := range diff.removedIndexes {
 		appendName(strings.Join(cols, "_"))
 	}
 

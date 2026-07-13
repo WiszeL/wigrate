@@ -160,19 +160,53 @@ func buildCreateTableSQL(schema tableSchema) string {
 		lines = append(lines, "    "+buildCreateForeignKeyDefinition(schema.name, foreignKey))
 	}
 
-	return fmt.Sprintf("CREATE TABLE %s (\n%s\n);\n", schema.name, strings.Join(lines, ",\n"))
+	statements := []string{fmt.Sprintf("CREATE TABLE %s (\n%s\n);", schema.name, strings.Join(lines, ",\n"))}
+
+	// Indexes are not table constraints — always standalone statements, even at create time.
+	for _, cols := range schema.indexes {
+		statements = append(statements, createIndexStmt(schema.name, cols))
+	}
+
+	return strings.Join(statements, "\n") + "\n"
 }
 
 func buildDropTableSQL(schema tableSchema) string {
 	return fmt.Sprintf("DROP TABLE IF EXISTS %s;\n", schema.name)
 }
 
+// buildAlterTableSQL and buildRevertAlterTableSQL assemble the ALTER TABLE block
+// (if any column/FK/unique changes exist) plus standalone CREATE/DROP INDEX
+// statements — indexes are not table constraints, so they never nest inside
+// ALTER TABLE, and an index-only diff must omit the (otherwise empty) block.
 func buildAlterTableSQL(diff schemaDiff) string {
-	return fmt.Sprintf("ALTER TABLE %s\n%s;\n", diff.tableName, strings.Join(buildAlterUpLines(diff), ",\n"))
+	statements := alterTableStatements(diff.tableName, buildAlterUpLines(diff))
+	for _, cols := range diff.removedIndexes {
+		statements = append(statements, dropIndexStmt(diff.tableName, cols))
+	}
+	for _, cols := range diff.addedIndexes {
+		statements = append(statements, createIndexStmt(diff.tableName, cols))
+	}
+
+	return strings.Join(statements, "\n") + "\n"
 }
 
 func buildRevertAlterTableSQL(diff schemaDiff) string {
-	return fmt.Sprintf("ALTER TABLE %s\n%s;\n", diff.tableName, strings.Join(buildAlterDownLines(diff), ",\n"))
+	statements := alterTableStatements(diff.tableName, buildAlterDownLines(diff))
+	for i := len(diff.addedIndexes) - 1; i >= 0; i-- {
+		statements = append(statements, dropIndexStmt(diff.tableName, diff.addedIndexes[i]))
+	}
+	for i := len(diff.removedIndexes) - 1; i >= 0; i-- {
+		statements = append(statements, createIndexStmt(diff.tableName, diff.removedIndexes[i]))
+	}
+
+	return strings.Join(statements, "\n") + "\n"
+}
+
+func alterTableStatements(tableName string, lines []string) []string {
+	if len(lines) == 0 {
+		return nil
+	}
+	return []string{fmt.Sprintf("ALTER TABLE %s\n%s;", tableName, strings.Join(lines, ",\n"))}
 }
 
 func buildAlterUpLines(diff schemaDiff) []string {
@@ -369,4 +403,17 @@ func buildUniqueConstraintDefinition(tableName string, columns []string) string 
 
 func uniqueConstraintName(tableName string, columns ...string) string {
 	return "uq_" + tableName + "_" + strings.Join(columns, "_")
+}
+
+func indexName(tableName string, columns []string) string {
+	return "idx_" + tableName + "_" + strings.Join(columns, "_")
+}
+
+func createIndexStmt(tableName string, columns []string) string {
+	return "CREATE INDEX " + indexName(tableName, columns) + " ON " + tableName + " (" + strings.Join(columns, ", ") + ");"
+}
+
+// dropIndexStmt takes the index name only — Postgres index names are schema-scoped, not table-scoped.
+func dropIndexStmt(tableName string, columns []string) string {
+	return "DROP INDEX IF EXISTS " + indexName(tableName, columns) + ";"
 }

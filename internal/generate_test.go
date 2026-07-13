@@ -534,3 +534,89 @@ type Membership struct {
 `, string(downSQL))
 	})
 }
+
+func Test_Migration_MakeInitMigrationIndex(t *testing.T) {
+	t.Run("creates init migration with a standalone CREATE INDEX statement", func(t *testing.T) {
+		// ===== Arrange ===== //
+		module := makeTestMigrationModule(t, "shop", "article.go", `package entity
+
+import "github.com/google/uuid"
+
+type Article struct {
+	ID    uuid.UUID
+	Title string // 100 index
+}
+`)
+
+		restoreRunCommand := stubRunCommand(t, func(cmd string, args ...string) error {
+			upPath := filepath.Join(module.migrationDir, "000001_init_article.up.sql")
+			downPath := filepath.Join(module.migrationDir, "000001_init_article.down.sql")
+			assert.NoError(t, os.WriteFile(upPath, []byte(""), 0644))
+			assert.NoError(t, os.WriteFile(downPath, []byte(""), 0644))
+			return nil
+		})
+		defer restoreRunCommand()
+
+		// ===== Act ===== //
+		err := makeInitMigration(module, "article")
+
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+
+		upSQL, err := os.ReadFile(filepath.Join(module.migrationDir, "000001_init_article.up.sql"))
+		assert.NoError(t, err)
+
+		assert.Equal(t, `CREATE TABLE articles (
+    id UUID PRIMARY KEY,
+    title VARCHAR(100) NOT NULL
+);
+CREATE INDEX idx_articles_title ON articles (title);
+`, string(upSQL))
+	})
+}
+
+func Test_Migration_MakeAlterMigrationIndexOnly(t *testing.T) {
+	t.Run("index-only change emits standalone CREATE/DROP INDEX with no ALTER TABLE block", func(t *testing.T) {
+		// ===== Arrange ===== //
+		module := makeTestMigrationModule(t, "shop", "article.go", `package entity
+
+import "github.com/google/uuid"
+
+type Article struct {
+	ID    uuid.UUID
+	Title string // 100 index
+}
+`)
+		assert.NoError(t, os.WriteFile(filepath.Join(module.migrationDir, "000001_init_article.up.sql"), []byte(`CREATE TABLE articles (
+    id UUID PRIMARY KEY,
+    title VARCHAR(100) NOT NULL
+);
+`), 0644))
+		assert.NoError(t, os.WriteFile(filepath.Join(module.migrationDir, "000001_init_article.down.sql"), []byte("DROP TABLE IF EXISTS articles;\n"), 0644))
+
+		restoreRunCommand := stubRunCommand(t, func(cmd string, args ...string) error {
+			upPath := filepath.Join(module.migrationDir, "000002_alter_title_article.up.sql")
+			downPath := filepath.Join(module.migrationDir, "000002_alter_title_article.down.sql")
+			assert.NoError(t, os.WriteFile(upPath, []byte(""), 0644))
+			assert.NoError(t, os.WriteFile(downPath, []byte(""), 0644))
+			return nil
+		})
+		defer restoreRunCommand()
+
+		// ===== Act ===== //
+		entries, err := os.ReadDir(module.migrationDir)
+		require.NoError(t, err)
+		err = makeAlterMigration(module, entries, "article")
+
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+
+		upSQL, err := os.ReadFile(filepath.Join(module.migrationDir, "000002_alter_title_article.up.sql"))
+		assert.NoError(t, err)
+		downSQL, err := os.ReadFile(filepath.Join(module.migrationDir, "000002_alter_title_article.down.sql"))
+		assert.NoError(t, err)
+
+		assert.Equal(t, "CREATE INDEX idx_articles_title ON articles (title);\n", string(upSQL))
+		assert.Equal(t, "DROP INDEX IF EXISTS idx_articles_title;\n", string(downSQL))
+	})
+}
