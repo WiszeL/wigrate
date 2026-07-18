@@ -1,12 +1,16 @@
-package internal
+package migrate
 
 import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/wiszel/wigrate/internal"
 )
 
 func Test_Migration_MigrateUp(t *testing.T) {
@@ -27,7 +31,7 @@ func Test_Migration_MigrateUp(t *testing.T) {
 		defer restoreRunCommand()
 
 		// ===== Act ===== //
-		err := MigrateUp()
+		err := Up()
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)
@@ -53,13 +57,20 @@ func Test_Migration_MigrateUp(t *testing.T) {
 		defer restoreRunCommand()
 
 		// ===== Act ===== //
-		err := MigrateUp("iam")
+		err := Up("iam")
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)
-		assert.Len(t, calls, 1)
-		assert.Contains(t, calls[0], filepath.Join(root, "module", "iam", "migration"))
-		assert.Contains(t, calls[0], "up")
+		require.Len(t, calls, 1)
+		expected := []string{
+			"-path", filepath.Join(root, "module", "iam", "migration"),
+			"-database", "postgres://postgres:secret@localhost:5432/wibee?sslmode=disable&x-migrations-table=schema_migrations_iam",
+			"up",
+		}
+		require.Len(t, calls[0], len(expected))
+		for i := range expected {
+			assert.Equal(t, expected[i], calls[0][i])
+		}
 	})
 
 	t.Run("skips module without migration files", func(t *testing.T) {
@@ -77,7 +88,7 @@ func Test_Migration_MigrateUp(t *testing.T) {
 		defer restoreRunCommand()
 
 		// ===== Act ===== //
-		err := MigrateUp()
+		err := Up()
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)
@@ -97,7 +108,7 @@ func Test_Migration_MigrateUp(t *testing.T) {
 		defer restoreRunCommand()
 
 		// ===== Act ===== //
-		err := MigrateUp()
+		err := Up()
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)
@@ -121,20 +132,27 @@ func Test_Migration_MigrateDown(t *testing.T) {
 		defer restoreRunCommand()
 
 		// ===== Act ===== //
-		err := MigrateDown(1, "iam")
+		err := Down(1, "iam")
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)
-		assert.Len(t, calls, 1)
-		assert.Contains(t, calls[0], "down")
-		assert.Contains(t, calls[0], "1")
+		require.Len(t, calls, 1)
+		expected := []string{
+			"-path", filepath.Join(root, "module", "iam", "migration"),
+			"-database", "postgres://postgres:secret@localhost:5432/wibee?sslmode=disable&x-migrations-table=schema_migrations_iam",
+			"down", "1",
+		}
+		require.Len(t, calls[0], len(expected))
+		for i := range expected {
+			assert.Equal(t, expected[i], calls[0][i])
+		}
 	})
 
 	t.Run("rejects invalid steps", func(t *testing.T) {
 		// ===== Arrange ===== //
 
 		// ===== Act ===== //
-		err := MigrateDown(0)
+		err := Down(0)
 
 		// ===== Assert ===== //
 		assert.Error(t, err)
@@ -171,4 +189,33 @@ func writeTestMigrationFile(t *testing.T, root string, moduleName string, fileNa
 	migrationDir := filepath.Join(root, "module", moduleName, "migration")
 	assert.NoError(t, os.MkdirAll(migrationDir, 0755))
 	assert.NoError(t, os.WriteFile(filepath.Join(migrationDir, fileName), []byte("-- test\n"), 0644))
+}
+
+func unsetDatabaseEnv(t *testing.T) {
+	t.Helper()
+
+	for _, key := range []string{"DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD", "DB_SSLMODE"} {
+		previous, existed := os.LookupEnv(key)
+		assert.NoError(t, os.Unsetenv(key))
+		t.Cleanup(func() {
+			if existed {
+				assert.NoError(t, os.Setenv(key, previous))
+				return
+			}
+			assert.NoError(t, os.Unsetenv(key))
+		})
+	}
+}
+
+func stubRunCommand(t *testing.T, stub func(cmd string, args ...string) error) func() {
+	t.Helper()
+
+	original := config.RunCommandFunc
+	config.RunCommandFunc = func(cmd string, args ...string) error {
+		return stub(cmd, slices.Clone(args)...)
+	}
+
+	return func() {
+		config.RunCommandFunc = original
+	}
 }

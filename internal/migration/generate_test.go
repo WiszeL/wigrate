@@ -1,13 +1,14 @@
-package internal
+package migration
 
 import (
 	"os"
 	"path/filepath"
-	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/wiszel/wigrate/internal/discover"
 )
 
 func Test_Migration_MakeInitMigration(t *testing.T) {
@@ -25,10 +26,10 @@ type User struct {
 
 		restoreRunCommand := stubRunCommand(t, func(cmd string, args ...string) error {
 			assert.Equal(t, "migrate", cmd)
-			assert.Equal(t, []string{"create", "-ext", "sql", "-dir", module.migrationDir, "-seq", "init_user"}, args)
+			assert.Equal(t, []string{"create", "-ext", "sql", "-dir", module.MigrationDir, "-seq", "init_user"}, args)
 
-			upPath := filepath.Join(module.migrationDir, "000001_init_user.up.sql")
-			downPath := filepath.Join(module.migrationDir, "000001_init_user.down.sql")
+			upPath := filepath.Join(module.MigrationDir, "000001_init_user.up.sql")
+			downPath := filepath.Join(module.MigrationDir, "000001_init_user.down.sql")
 			assert.NoError(t, os.WriteFile(upPath, []byte(""), 0644))
 			assert.NoError(t, os.WriteFile(downPath, []byte(""), 0644))
 			return nil
@@ -41,9 +42,9 @@ type User struct {
 		// ===== Assert ===== //
 		assert.NoError(t, err)
 
-		upSQL, err := os.ReadFile(filepath.Join(module.migrationDir, "000001_init_user.up.sql"))
+		upSQL, err := os.ReadFile(filepath.Join(module.MigrationDir, "000001_init_user.up.sql"))
 		assert.NoError(t, err)
-		downSQL, err := os.ReadFile(filepath.Join(module.migrationDir, "000001_init_user.down.sql"))
+		downSQL, err := os.ReadFile(filepath.Join(module.MigrationDir, "000001_init_user.down.sql"))
 		assert.NoError(t, err)
 
 		assert.Equal(t, `CREATE TABLE users (
@@ -72,7 +73,7 @@ type User struct {
 		// migrate create is a no-op under dry-run; assert it's never called for real work.
 		restoreRunCommand := stubRunCommand(t, func(cmd string, args ...string) error {
 			assert.Equal(t, "migrate", cmd)
-			assert.Equal(t, []string{"create", "-ext", "sql", "-dir", module.migrationDir, "-seq", "init_user"}, args)
+			assert.Equal(t, []string{"create", "-ext", "sql", "-dir", module.MigrationDir, "-seq", "init_user"}, args)
 			return nil
 		})
 		defer restoreRunCommand()
@@ -81,10 +82,10 @@ type User struct {
 		err := makeInitMigration(module, "user")
 
 		// ===== Assert ===== //
-		require.NoError(t, err)
+		assert.NoError(t, err)
 
-		entries, readErr := os.ReadDir(module.migrationDir)
-		require.NoError(t, readErr)
+		entries, readErr := os.ReadDir(module.MigrationDir)
+		assert.NoError(t, readErr)
 		assert.Empty(t, entries, "dry-run must not write migration files to disk")
 	})
 }
@@ -103,19 +104,19 @@ type User struct {
 	RoleID uuid.UUID // ref:roles del:cascade
 }
 `)
-		assert.NoError(t, os.WriteFile(filepath.Join(module.migrationDir, "000001_init_user.up.sql"), []byte(`CREATE TABLE users (
+		assert.NoError(t, os.WriteFile(filepath.Join(module.MigrationDir, "000001_init_user.up.sql"), []byte(`CREATE TABLE users (
     id UUID PRIMARY KEY,
     email VARCHAR(20) NOT NULL
 );
 `), 0644))
-		assert.NoError(t, os.WriteFile(filepath.Join(module.migrationDir, "000001_init_user.down.sql"), []byte("DROP TABLE IF EXISTS users;\n"), 0644))
+		assert.NoError(t, os.WriteFile(filepath.Join(module.MigrationDir, "000001_init_user.down.sql"), []byte("DROP TABLE IF EXISTS users;\n"), 0644))
 
 		restoreRunCommand := stubRunCommand(t, func(cmd string, args ...string) error {
 			assert.Equal(t, "migrate", cmd)
-			assert.Equal(t, []string{"create", "-ext", "sql", "-dir", module.migrationDir, "-seq", "alter_name_role_id_user"}, args)
+			assert.Equal(t, []string{"create", "-ext", "sql", "-dir", module.MigrationDir, "-seq", "alter_name_role_id_user"}, args)
 
-			upPath := filepath.Join(module.migrationDir, "000002_alter_name_role_id_user.up.sql")
-			downPath := filepath.Join(module.migrationDir, "000002_alter_name_role_id_user.down.sql")
+			upPath := filepath.Join(module.MigrationDir, "000002_alter_name_role_id_user.up.sql")
+			downPath := filepath.Join(module.MigrationDir, "000002_alter_name_role_id_user.down.sql")
 			assert.NoError(t, os.WriteFile(upPath, []byte(""), 0644))
 			assert.NoError(t, os.WriteFile(downPath, []byte(""), 0644))
 			return nil
@@ -123,16 +124,16 @@ type User struct {
 		defer restoreRunCommand()
 
 		// ===== Act ===== //
-		entries, err := os.ReadDir(module.migrationDir)
+		entries, err := os.ReadDir(module.MigrationDir)
 		require.NoError(t, err)
 		err = makeAlterMigration(module, entries, "user")
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)
 
-		upSQL, err := os.ReadFile(filepath.Join(module.migrationDir, "000002_alter_name_role_id_user.up.sql"))
+		upSQL, err := os.ReadFile(filepath.Join(module.MigrationDir, "000002_alter_name_role_id_user.up.sql"))
 		assert.NoError(t, err)
-		downSQL, err := os.ReadFile(filepath.Join(module.migrationDir, "000002_alter_name_role_id_user.down.sql"))
+		downSQL, err := os.ReadFile(filepath.Join(module.MigrationDir, "000002_alter_name_role_id_user.down.sql"))
 		assert.NoError(t, err)
 
 		assert.Equal(t, `ALTER TABLE users
@@ -164,7 +165,7 @@ type User struct {
 	NewCode  string // 10
 }
 `)
-		assert.NoError(t, os.WriteFile(filepath.Join(module.migrationDir, "000001_init_user.up.sql"), []byte(`CREATE TABLE users (
+		assert.NoError(t, os.WriteFile(filepath.Join(module.MigrationDir, "000001_init_user.up.sql"), []byte(`CREATE TABLE users (
     id UUID PRIMARY KEY,
     email TEXT NOT NULL,
     age INTEGER NOT NULL,
@@ -174,14 +175,14 @@ type User struct {
     CONSTRAINT fk_users_role_id FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE
 );
 `), 0644))
-		assert.NoError(t, os.WriteFile(filepath.Join(module.migrationDir, "000001_init_user.down.sql"), []byte("DROP TABLE IF EXISTS users;\n"), 0644))
+		assert.NoError(t, os.WriteFile(filepath.Join(module.MigrationDir, "000001_init_user.down.sql"), []byte("DROP TABLE IF EXISTS users;\n"), 0644))
 
 		restoreRunCommand := stubRunCommand(t, func(cmd string, args ...string) error {
 			assert.Equal(t, "migrate", cmd)
-			assert.Equal(t, []string{"create", "-ext", "sql", "-dir", module.migrationDir, "-seq", "alter_new_code_obsolete_etc_user"}, args)
+			assert.Equal(t, []string{"create", "-ext", "sql", "-dir", module.MigrationDir, "-seq", "alter_new_code_obsolete_etc_user"}, args)
 
-			upPath := filepath.Join(module.migrationDir, "000002_alter_new_code_obsolete_etc_user.up.sql")
-			downPath := filepath.Join(module.migrationDir, "000002_alter_new_code_obsolete_etc_user.down.sql")
+			upPath := filepath.Join(module.MigrationDir, "000002_alter_new_code_obsolete_etc_user.up.sql")
+			downPath := filepath.Join(module.MigrationDir, "000002_alter_new_code_obsolete_etc_user.down.sql")
 			assert.NoError(t, os.WriteFile(upPath, []byte(""), 0644))
 			assert.NoError(t, os.WriteFile(downPath, []byte(""), 0644))
 			return nil
@@ -189,16 +190,16 @@ type User struct {
 		defer restoreRunCommand()
 
 		// ===== Act ===== //
-		entries, err := os.ReadDir(module.migrationDir)
+		entries, err := os.ReadDir(module.MigrationDir)
 		require.NoError(t, err)
 		err = makeAlterMigration(module, entries, "user")
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)
 
-		upSQL, err := os.ReadFile(filepath.Join(module.migrationDir, "000002_alter_new_code_obsolete_etc_user.up.sql"))
+		upSQL, err := os.ReadFile(filepath.Join(module.MigrationDir, "000002_alter_new_code_obsolete_etc_user.up.sql"))
 		assert.NoError(t, err)
-		downSQL, err := os.ReadFile(filepath.Join(module.migrationDir, "000002_alter_new_code_obsolete_etc_user.down.sql"))
+		downSQL, err := os.ReadFile(filepath.Join(module.MigrationDir, "000002_alter_new_code_obsolete_etc_user.down.sql"))
 		assert.NoError(t, err)
 
 		assert.Equal(t, `ALTER TABLE users
@@ -234,12 +235,12 @@ type User struct {
 	Email string // 20 unique
 }
 `)
-		assert.NoError(t, os.WriteFile(filepath.Join(module.migrationDir, "000001_init_user.up.sql"), []byte(`CREATE TABLE users (
+		assert.NoError(t, os.WriteFile(filepath.Join(module.MigrationDir, "000001_init_user.up.sql"), []byte(`CREATE TABLE users (
     id UUID PRIMARY KEY,
     email VARCHAR(20) NOT NULL UNIQUE
 );
 `), 0644))
-		assert.NoError(t, os.WriteFile(filepath.Join(module.migrationDir, "000001_init_user.down.sql"), []byte("DROP TABLE IF EXISTS users;\n"), 0644))
+		assert.NoError(t, os.WriteFile(filepath.Join(module.MigrationDir, "000001_init_user.down.sql"), []byte("DROP TABLE IF EXISTS users;\n"), 0644))
 
 		called := false
 		restoreRunCommand := stubRunCommand(t, func(cmd string, args ...string) error {
@@ -249,7 +250,7 @@ type User struct {
 		defer restoreRunCommand()
 
 		// ===== Act ===== //
-		entries, err := os.ReadDir(module.migrationDir)
+		entries, err := os.ReadDir(module.MigrationDir)
 		require.NoError(t, err)
 		err = makeAlterMigration(module, entries, "user")
 
@@ -271,20 +272,20 @@ type User struct {
 	Email string // 20 unique
 }
 `)
-		upPath := filepath.Join(module.migrationDir, "000001_init_user.up.sql")
-		downPath := filepath.Join(module.migrationDir, "000001_init_user.down.sql")
+		upPath := filepath.Join(module.MigrationDir, "000001_init_user.up.sql")
+		downPath := filepath.Join(module.MigrationDir, "000001_init_user.down.sql")
 		assert.NoError(t, os.WriteFile(upPath, []byte("-- old up\n"), 0644))
 		assert.NoError(t, os.WriteFile(downPath, []byte("-- old down\n"), 0644))
 
-		latest := migrationFile{
-			path:      upPath,
-			baseName:  "000001_init_user",
-			kind:      migrationKindInit,
-			direction: "up",
+		latest := discover.File{
+			Path:      upPath,
+			BaseName:  "000001_init_user",
+			Kind:      discover.KindInit,
+			Direction: "up",
 		}
 
 		// ===== Act ===== //
-		entries, err := os.ReadDir(module.migrationDir)
+		entries, err := os.ReadDir(module.MigrationDir)
 		require.NoError(t, err)
 		err = overwriteLatestMigration(module, entries, "user", latest)
 
@@ -317,26 +318,26 @@ type User struct {
 	RoleID uuid.UUID // ref:roles del:cascade
 }
 `)
-		assert.NoError(t, os.WriteFile(filepath.Join(module.migrationDir, "000001_init_user.up.sql"), []byte(`CREATE TABLE users (
+		assert.NoError(t, os.WriteFile(filepath.Join(module.MigrationDir, "000001_init_user.up.sql"), []byte(`CREATE TABLE users (
     id UUID PRIMARY KEY,
     email VARCHAR(20) NOT NULL
 );
 `), 0644))
-		assert.NoError(t, os.WriteFile(filepath.Join(module.migrationDir, "000001_init_user.down.sql"), []byte("DROP TABLE IF EXISTS users;\n"), 0644))
-		upPath := filepath.Join(module.migrationDir, "000002_alter_name_user.up.sql")
-		downPath := filepath.Join(module.migrationDir, "000002_alter_name_user.down.sql")
+		assert.NoError(t, os.WriteFile(filepath.Join(module.MigrationDir, "000001_init_user.down.sql"), []byte("DROP TABLE IF EXISTS users;\n"), 0644))
+		upPath := filepath.Join(module.MigrationDir, "000002_alter_name_user.up.sql")
+		downPath := filepath.Join(module.MigrationDir, "000002_alter_name_user.down.sql")
 		assert.NoError(t, os.WriteFile(upPath, []byte("-- old up\n"), 0644))
 		assert.NoError(t, os.WriteFile(downPath, []byte("-- old down\n"), 0644))
 
-		latest := migrationFile{
-			path:      upPath,
-			baseName:  "000002_alter_name_user",
-			kind:      migrationKindAlter,
-			direction: "up",
+		latest := discover.File{
+			Path:      upPath,
+			BaseName:  "000002_alter_name_user",
+			Kind:      discover.KindAlter,
+			Direction: "up",
 		}
 
 		// ===== Act ===== //
-		entries, err := os.ReadDir(module.migrationDir)
+		entries, err := os.ReadDir(module.MigrationDir)
 		require.NoError(t, err)
 		err = overwriteLatestMigration(module, entries, "user", latest)
 
@@ -372,14 +373,14 @@ type User struct {
 	Name  string // 50
 }
 `)
-		assert.NoError(t, os.WriteFile(filepath.Join(module.migrationDir, "000001_init_user.up.sql"), []byte(`CREATE TABLE users (
+		assert.NoError(t, os.WriteFile(filepath.Join(module.MigrationDir, "000001_init_user.up.sql"), []byte(`CREATE TABLE users (
     id UUID PRIMARY KEY,
     email VARCHAR(20) NOT NULL UNIQUE
 );
 `), 0644))
-		assert.NoError(t, os.WriteFile(filepath.Join(module.migrationDir, "000001_init_user.down.sql"), []byte("DROP TABLE IF EXISTS users;\n"), 0644))
-		upPath := filepath.Join(module.migrationDir, "000002_alter_name_user.up.sql")
-		downPath := filepath.Join(module.migrationDir, "000002_alter_name_user.down.sql")
+		assert.NoError(t, os.WriteFile(filepath.Join(module.MigrationDir, "000001_init_user.down.sql"), []byte("DROP TABLE IF EXISTS users;\n"), 0644))
+		upPath := filepath.Join(module.MigrationDir, "000002_alter_name_user.up.sql")
+		downPath := filepath.Join(module.MigrationDir, "000002_alter_name_user.down.sql")
 		originalUp := `ALTER TABLE users
     ADD COLUMN name VARCHAR(50) NOT NULL;
 `
@@ -389,15 +390,15 @@ type User struct {
 		assert.NoError(t, os.WriteFile(upPath, []byte(originalUp), 0644))
 		assert.NoError(t, os.WriteFile(downPath, []byte(originalDown), 0644))
 
-		latest := migrationFile{
-			path:      upPath,
-			baseName:  "000002_alter_name_user",
-			kind:      migrationKindAlter,
-			direction: "up",
+		latest := discover.File{
+			Path:      upPath,
+			BaseName:  "000002_alter_name_user",
+			Kind:      discover.KindAlter,
+			Direction: "up",
 		}
 
 		// ===== Act ===== //
-		entries, err := os.ReadDir(module.migrationDir)
+		entries, err := os.ReadDir(module.MigrationDir)
 		require.NoError(t, err)
 		err = overwriteLatestMigration(module, entries, "user", latest)
 
@@ -411,30 +412,6 @@ type User struct {
 		assert.Equal(t, originalUp, string(upSQL))
 		assert.Equal(t, originalDown, string(downSQL))
 	})
-}
-
-func stubRunCommand(t *testing.T, stub func(cmd string, args ...string) error) func() {
-	t.Helper()
-
-	original := runCommandFunc
-	runCommandFunc = func(cmd string, args ...string) error {
-		return stub(cmd, slices.Clone(args)...)
-	}
-
-	return func() {
-		runCommandFunc = original
-	}
-}
-
-func stubDryRun(t *testing.T, value bool) func() {
-	t.Helper()
-
-	original := DryRun
-	DryRun = value
-
-	return func() {
-		DryRun = original
-	}
 }
 
 func Test_Migration_MakeInitMigrationComposite(t *testing.T) {
@@ -453,8 +430,8 @@ type Membership struct {
 `)
 
 		restoreRunCommand := stubRunCommand(t, func(cmd string, args ...string) error {
-			upPath := filepath.Join(module.migrationDir, "000001_init_membership.up.sql")
-			downPath := filepath.Join(module.migrationDir, "000001_init_membership.down.sql")
+			upPath := filepath.Join(module.MigrationDir, "000001_init_membership.up.sql")
+			downPath := filepath.Join(module.MigrationDir, "000001_init_membership.down.sql")
 			assert.NoError(t, os.WriteFile(upPath, []byte(""), 0644))
 			assert.NoError(t, os.WriteFile(downPath, []byte(""), 0644))
 			return nil
@@ -467,7 +444,7 @@ type Membership struct {
 		// ===== Assert ===== //
 		assert.NoError(t, err)
 
-		upSQL, err := os.ReadFile(filepath.Join(module.migrationDir, "000001_init_membership.up.sql"))
+		upSQL, err := os.ReadFile(filepath.Join(module.MigrationDir, "000001_init_membership.up.sql"))
 		assert.NoError(t, err)
 
 		assert.Equal(t, `CREATE TABLE memberships (
@@ -496,17 +473,17 @@ type Membership struct {
 	User uuid.UUID // unique:member
 }
 `)
-		assert.NoError(t, os.WriteFile(filepath.Join(module.migrationDir, "000001_init_membership.up.sql"), []byte(`CREATE TABLE memberships (
+		assert.NoError(t, os.WriteFile(filepath.Join(module.MigrationDir, "000001_init_membership.up.sql"), []byte(`CREATE TABLE memberships (
     id UUID PRIMARY KEY,
     team UUID NOT NULL,
     user UUID NOT NULL
 );
 `), 0644))
-		assert.NoError(t, os.WriteFile(filepath.Join(module.migrationDir, "000001_init_membership.down.sql"), []byte("DROP TABLE IF EXISTS memberships;\n"), 0644))
+		assert.NoError(t, os.WriteFile(filepath.Join(module.MigrationDir, "000001_init_membership.down.sql"), []byte("DROP TABLE IF EXISTS memberships;\n"), 0644))
 
 		restoreRunCommand := stubRunCommand(t, func(cmd string, args ...string) error {
-			upPath := filepath.Join(module.migrationDir, "000002_alter_team_user_membership.up.sql")
-			downPath := filepath.Join(module.migrationDir, "000002_alter_team_user_membership.down.sql")
+			upPath := filepath.Join(module.MigrationDir, "000002_alter_team_user_membership.up.sql")
+			downPath := filepath.Join(module.MigrationDir, "000002_alter_team_user_membership.down.sql")
 			assert.NoError(t, os.WriteFile(upPath, []byte(""), 0644))
 			assert.NoError(t, os.WriteFile(downPath, []byte(""), 0644))
 			return nil
@@ -514,16 +491,16 @@ type Membership struct {
 		defer restoreRunCommand()
 
 		// ===== Act ===== //
-		entries, err := os.ReadDir(module.migrationDir)
+		entries, err := os.ReadDir(module.MigrationDir)
 		require.NoError(t, err)
 		err = makeAlterMigration(module, entries, "membership")
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)
 
-		upSQL, err := os.ReadFile(filepath.Join(module.migrationDir, "000002_alter_team_user_membership.up.sql"))
+		upSQL, err := os.ReadFile(filepath.Join(module.MigrationDir, "000002_alter_team_user_membership.up.sql"))
 		assert.NoError(t, err)
-		downSQL, err := os.ReadFile(filepath.Join(module.migrationDir, "000002_alter_team_user_membership.down.sql"))
+		downSQL, err := os.ReadFile(filepath.Join(module.MigrationDir, "000002_alter_team_user_membership.down.sql"))
 		assert.NoError(t, err)
 
 		assert.Equal(t, `ALTER TABLE memberships
@@ -549,8 +526,8 @@ type Article struct {
 `)
 
 		restoreRunCommand := stubRunCommand(t, func(cmd string, args ...string) error {
-			upPath := filepath.Join(module.migrationDir, "000001_init_article.up.sql")
-			downPath := filepath.Join(module.migrationDir, "000001_init_article.down.sql")
+			upPath := filepath.Join(module.MigrationDir, "000001_init_article.up.sql")
+			downPath := filepath.Join(module.MigrationDir, "000001_init_article.down.sql")
 			assert.NoError(t, os.WriteFile(upPath, []byte(""), 0644))
 			assert.NoError(t, os.WriteFile(downPath, []byte(""), 0644))
 			return nil
@@ -563,7 +540,7 @@ type Article struct {
 		// ===== Assert ===== //
 		assert.NoError(t, err)
 
-		upSQL, err := os.ReadFile(filepath.Join(module.migrationDir, "000001_init_article.up.sql"))
+		upSQL, err := os.ReadFile(filepath.Join(module.MigrationDir, "000001_init_article.up.sql"))
 		assert.NoError(t, err)
 
 		assert.Equal(t, `CREATE TABLE articles (
@@ -587,16 +564,16 @@ type Article struct {
 	Title string // 100 index
 }
 `)
-		assert.NoError(t, os.WriteFile(filepath.Join(module.migrationDir, "000001_init_article.up.sql"), []byte(`CREATE TABLE articles (
+		assert.NoError(t, os.WriteFile(filepath.Join(module.MigrationDir, "000001_init_article.up.sql"), []byte(`CREATE TABLE articles (
     id UUID PRIMARY KEY,
     title VARCHAR(100) NOT NULL
 );
 `), 0644))
-		assert.NoError(t, os.WriteFile(filepath.Join(module.migrationDir, "000001_init_article.down.sql"), []byte("DROP TABLE IF EXISTS articles;\n"), 0644))
+		assert.NoError(t, os.WriteFile(filepath.Join(module.MigrationDir, "000001_init_article.down.sql"), []byte("DROP TABLE IF EXISTS articles;\n"), 0644))
 
 		restoreRunCommand := stubRunCommand(t, func(cmd string, args ...string) error {
-			upPath := filepath.Join(module.migrationDir, "000002_alter_title_article.up.sql")
-			downPath := filepath.Join(module.migrationDir, "000002_alter_title_article.down.sql")
+			upPath := filepath.Join(module.MigrationDir, "000002_alter_title_article.up.sql")
+			downPath := filepath.Join(module.MigrationDir, "000002_alter_title_article.down.sql")
 			assert.NoError(t, os.WriteFile(upPath, []byte(""), 0644))
 			assert.NoError(t, os.WriteFile(downPath, []byte(""), 0644))
 			return nil
@@ -604,16 +581,16 @@ type Article struct {
 		defer restoreRunCommand()
 
 		// ===== Act ===== //
-		entries, err := os.ReadDir(module.migrationDir)
+		entries, err := os.ReadDir(module.MigrationDir)
 		require.NoError(t, err)
 		err = makeAlterMigration(module, entries, "article")
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)
 
-		upSQL, err := os.ReadFile(filepath.Join(module.migrationDir, "000002_alter_title_article.up.sql"))
+		upSQL, err := os.ReadFile(filepath.Join(module.MigrationDir, "000002_alter_title_article.up.sql"))
 		assert.NoError(t, err)
-		downSQL, err := os.ReadFile(filepath.Join(module.migrationDir, "000002_alter_title_article.down.sql"))
+		downSQL, err := os.ReadFile(filepath.Join(module.MigrationDir, "000002_alter_title_article.down.sql"))
 		assert.NoError(t, err)
 
 		assert.Equal(t, "CREATE INDEX idx_articles_title ON articles (title);\n", string(upSQL))
@@ -636,8 +613,8 @@ type Note struct {
 `)
 
 		restoreRunCommand := stubRunCommand(t, func(cmd string, args ...string) error {
-			upPath := filepath.Join(module.migrationDir, "000001_init_note.up.sql")
-			downPath := filepath.Join(module.migrationDir, "000001_init_note.down.sql")
+			upPath := filepath.Join(module.MigrationDir, "000001_init_note.up.sql")
+			downPath := filepath.Join(module.MigrationDir, "000001_init_note.down.sql")
 			assert.NoError(t, os.WriteFile(upPath, []byte(""), 0644))
 			assert.NoError(t, os.WriteFile(downPath, []byte(""), 0644))
 			return nil
@@ -650,7 +627,7 @@ type Note struct {
 		// ===== Assert ===== //
 		assert.NoError(t, err)
 
-		upSQL, err := os.ReadFile(filepath.Join(module.migrationDir, "000001_init_note.up.sql"))
+		upSQL, err := os.ReadFile(filepath.Join(module.MigrationDir, "000001_init_note.up.sql"))
 		assert.NoError(t, err)
 
 		assert.Equal(t, `CREATE TABLE notes (
@@ -677,16 +654,16 @@ type Note struct {
 	Title string // 100 trgm
 }
 `)
-		assert.NoError(t, os.WriteFile(filepath.Join(module.migrationDir, "000001_init_note.up.sql"), []byte(`CREATE TABLE notes (
+		assert.NoError(t, os.WriteFile(filepath.Join(module.MigrationDir, "000001_init_note.up.sql"), []byte(`CREATE TABLE notes (
     id UUID PRIMARY KEY,
     title VARCHAR(100) NOT NULL
 );
 `), 0644))
-		assert.NoError(t, os.WriteFile(filepath.Join(module.migrationDir, "000001_init_note.down.sql"), []byte("DROP TABLE IF EXISTS notes;\n"), 0644))
+		assert.NoError(t, os.WriteFile(filepath.Join(module.MigrationDir, "000001_init_note.down.sql"), []byte("DROP TABLE IF EXISTS notes;\n"), 0644))
 
 		restoreRunCommand := stubRunCommand(t, func(cmd string, args ...string) error {
-			upPath := filepath.Join(module.migrationDir, "000002_alter_title_note.up.sql")
-			downPath := filepath.Join(module.migrationDir, "000002_alter_title_note.down.sql")
+			upPath := filepath.Join(module.MigrationDir, "000002_alter_title_note.up.sql")
+			downPath := filepath.Join(module.MigrationDir, "000002_alter_title_note.down.sql")
 			assert.NoError(t, os.WriteFile(upPath, []byte(""), 0644))
 			assert.NoError(t, os.WriteFile(downPath, []byte(""), 0644))
 			return nil
@@ -694,16 +671,16 @@ type Note struct {
 		defer restoreRunCommand()
 
 		// ===== Act ===== //
-		entries, err := os.ReadDir(module.migrationDir)
+		entries, err := os.ReadDir(module.MigrationDir)
 		require.NoError(t, err)
 		err = makeAlterMigration(module, entries, "note")
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)
 
-		upSQL, err := os.ReadFile(filepath.Join(module.migrationDir, "000002_alter_title_note.up.sql"))
+		upSQL, err := os.ReadFile(filepath.Join(module.MigrationDir, "000002_alter_title_note.up.sql"))
 		assert.NoError(t, err)
-		downSQL, err := os.ReadFile(filepath.Join(module.migrationDir, "000002_alter_title_note.down.sql"))
+		downSQL, err := os.ReadFile(filepath.Join(module.MigrationDir, "000002_alter_title_note.down.sql"))
 		assert.NoError(t, err)
 
 		assert.Equal(t, "CREATE EXTENSION IF NOT EXISTS pg_trgm;\nCREATE INDEX idx_notes_title_trgm ON notes USING GIN (title gin_trgm_ops);\n", string(upSQL))

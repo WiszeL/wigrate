@@ -1,4 +1,4 @@
-package internal
+package discover
 
 import (
 	"os"
@@ -15,14 +15,14 @@ func Test_Migration_ParseMigrationFile(t *testing.T) {
 		path := "/tmp/000001_init_user.up.sql"
 
 		// ===== Act ===== //
-		file, ok := parseMigrationFile(path, "user")
+		file, ok := ParseMigrationFile(path, "user")
 
 		// ===== Assert ===== //
 		assert.True(t, ok)
-		assert.Equal(t, path, file.path)
-		assert.Equal(t, "000001_init_user", file.baseName)
-		assert.Equal(t, migrationKindInit, file.kind)
-		assert.Equal(t, "up", file.direction)
+		assert.Equal(t, path, file.Path)
+		assert.Equal(t, "000001_init_user", file.BaseName)
+		assert.Equal(t, KindInit, file.Kind)
+		assert.Equal(t, "up", file.Direction)
 	})
 
 	t.Run("parses golang migrate alter file", func(t *testing.T) {
@@ -30,14 +30,14 @@ func Test_Migration_ParseMigrationFile(t *testing.T) {
 		path := "/tmp/000002_alter_email_name_user.down.sql"
 
 		// ===== Act ===== //
-		file, ok := parseMigrationFile(path, "user")
+		file, ok := ParseMigrationFile(path, "user")
 
 		// ===== Assert ===== //
 		assert.True(t, ok)
-		assert.Equal(t, path, file.path)
-		assert.Equal(t, "000002_alter_email_name_user", file.baseName)
-		assert.Equal(t, migrationKindAlter, file.kind)
-		assert.Equal(t, "down", file.direction)
+		assert.Equal(t, path, file.Path)
+		assert.Equal(t, "000002_alter_email_name_user", file.BaseName)
+		assert.Equal(t, KindAlter, file.Kind)
+		assert.Equal(t, "down", file.Direction)
 	})
 
 	t.Run("does not match entity name inside another entity suffix", func(t *testing.T) {
@@ -45,7 +45,7 @@ func Test_Migration_ParseMigrationFile(t *testing.T) {
 		path := "/tmp/000001_init_super_user.up.sql"
 
 		// ===== Act ===== //
-		_, ok := parseMigrationFile(path, "user")
+		_, ok := ParseMigrationFile(path, "user")
 
 		// ===== Assert ===== //
 		assert.False(t, ok)
@@ -62,17 +62,21 @@ func Test_Discover_FindModules(t *testing.T) {
 		assert.NoError(t, os.MkdirAll(filepath.Join(root, "module", "billing", "internal", "domain", "entity"), 0755))
 
 		// ===== Act ===== //
-		modules, err := findModules()
+		modules, err := FindModules()
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)
 		assert.Len(t, modules, 2)
-		names := make(map[string]bool)
+		moduleMap := make(map[string]Module)
 		for _, m := range modules {
-			names[m.name] = true
+			moduleMap[m.Name] = m
 		}
-		assert.True(t, names["iam"])
-		assert.True(t, names["billing"])
+		assert.True(t, moduleMap["iam"].Name == "iam")
+		assert.True(t, moduleMap["billing"].Name == "billing")
+		assert.Equal(t, filepath.Join(root, "module", "iam", "migration"), moduleMap["iam"].MigrationDir)
+		assert.Equal(t, filepath.Join(root, "module", "iam", "internal", "domain", "entity"), moduleMap["iam"].EntityDir)
+		assert.Equal(t, filepath.Join(root, "module", "billing", "migration"), moduleMap["billing"].MigrationDir)
+		assert.Equal(t, filepath.Join(root, "module", "billing", "internal", "domain", "entity"), moduleMap["billing"].EntityDir)
 	})
 
 	t.Run("filters out non-directory entries", func(t *testing.T) {
@@ -84,7 +88,7 @@ func Test_Discover_FindModules(t *testing.T) {
 		assert.NoError(t, os.WriteFile(filepath.Join(root, "module", "file.txt"), []byte(""), 0644))
 
 		// ===== Act ===== //
-		modules, err := findModules()
+		modules, err := FindModules()
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)
@@ -98,7 +102,7 @@ func Test_Discover_FindModules(t *testing.T) {
 		assert.NoError(t, os.WriteFile(filepath.Join(root, "go.mod"), []byte("module test\n"), 0644))
 
 		// ===== Act ===== //
-		_, err := findModules()
+		_, err := FindModules()
 
 		// ===== Assert ===== //
 		assert.Error(t, err)
@@ -130,15 +134,17 @@ func Test_Discover_FindEntityMigrationState(t *testing.T) {
 		dir := t.TempDir()
 		assert.NoError(t, os.WriteFile(filepath.Join(dir, "000001_init_user.up.sql"), []byte(""), 0644))
 		assert.NoError(t, os.WriteFile(filepath.Join(dir, "000001_init_user.down.sql"), []byte(""), 0644))
-		module := migrationModule{migrationDir: dir}
+		module := Module{MigrationDir: dir}
 
 		// ===== Act ===== //
-		state, err := findEntityMigrationState(module, "user")
+		state, err := FindEntityMigrationState(module, "user")
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)
 		assert.NotNil(t, state)
-		assert.Equal(t, migrationKindInit, state.kind)
+		assert.Equal(t, KindInit, state.Kind)
+		assert.Equal(t, "000001_init_user", state.BaseName)
+		assert.Equal(t, "up", state.Direction)
 	})
 
 	t.Run("finds latest migration from init+alter", func(t *testing.T) {
@@ -146,16 +152,17 @@ func Test_Discover_FindEntityMigrationState(t *testing.T) {
 		dir := t.TempDir()
 		assert.NoError(t, os.WriteFile(filepath.Join(dir, "000001_init_user.up.sql"), []byte(""), 0644))
 		assert.NoError(t, os.WriteFile(filepath.Join(dir, "000002_alter_email_user.up.sql"), []byte(""), 0644))
-		module := migrationModule{migrationDir: dir}
+		module := Module{MigrationDir: dir}
 
 		// ===== Act ===== //
-		state, err := findEntityMigrationState(module, "user")
+		state, err := FindEntityMigrationState(module, "user")
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)
 		assert.NotNil(t, state)
-		assert.Equal(t, "000002_alter_email_user", state.baseName)
-		assert.Equal(t, migrationKindAlter, state.kind)
+		assert.Equal(t, "000002_alter_email_user", state.BaseName)
+		assert.Equal(t, KindAlter, state.Kind)
+		assert.Equal(t, "up", state.Direction)
 	})
 
 	t.Run("prefers up file over down when same base", func(t *testing.T) {
@@ -163,24 +170,26 @@ func Test_Discover_FindEntityMigrationState(t *testing.T) {
 		dir := t.TempDir()
 		assert.NoError(t, os.WriteFile(filepath.Join(dir, "000001_init_user.up.sql"), []byte(""), 0644))
 		assert.NoError(t, os.WriteFile(filepath.Join(dir, "000001_init_user.down.sql"), []byte(""), 0644))
-		module := migrationModule{migrationDir: dir}
+		module := Module{MigrationDir: dir}
 
 		// ===== Act ===== //
-		state, err := findEntityMigrationState(module, "user")
+		state, err := FindEntityMigrationState(module, "user")
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)
 		assert.NotNil(t, state)
-		assert.Equal(t, "up", state.direction)
+		assert.Equal(t, "up", state.Direction)
+		assert.Equal(t, "000001_init_user", state.BaseName)
+		assert.Equal(t, KindInit, state.Kind)
 	})
 
 	t.Run("returns empty state when no migrations exist", func(t *testing.T) {
 		// ===== Arrange ===== //
 		dir := t.TempDir()
-		module := migrationModule{migrationDir: dir}
+		module := Module{MigrationDir: dir}
 
 		// ===== Act ===== //
-		state, err := findEntityMigrationState(module, "user")
+		state, err := FindEntityMigrationState(module, "user")
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)
@@ -191,10 +200,10 @@ func Test_Discover_FindEntityMigrationState(t *testing.T) {
 		// ===== Arrange ===== //
 		dir := t.TempDir()
 		assert.NoError(t, os.WriteFile(filepath.Join(dir, "000001_init_post.up.sql"), []byte(""), 0644))
-		module := migrationModule{migrationDir: dir}
+		module := Module{MigrationDir: dir}
 
 		// ===== Act ===== //
-		state, err := findEntityMigrationState(module, "user")
+		state, err := FindEntityMigrationState(module, "user")
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)
@@ -205,16 +214,64 @@ func Test_Discover_FindEntityMigrationState(t *testing.T) {
 func Test_Discover_MigrationFilePair(t *testing.T) {
 	t.Run("returns up and down file paths", func(t *testing.T) {
 		// ===== Arrange ===== //
-		file := migrationFile{
-			path:     "/tmp/migration/000001_init_user.up.sql",
-			baseName: "000001_init_user",
+		file := File{
+			Path:     "/tmp/migration/000001_init_user.up.sql",
+			BaseName: "000001_init_user",
 		}
 
 		// ===== Act ===== //
-		upPath, downPath := migrationFilePair(file)
+		upPath, downPath := MigrationFilePair(file)
 
 		// ===== Assert ===== //
 		assert.Equal(t, "/tmp/migration/000001_init_user.up.sql", upPath)
 		assert.Equal(t, "/tmp/migration/000001_init_user.down.sql", downPath)
+	})
+}
+
+func Test_Migration_FilterModules(t *testing.T) {
+	t.Run("returns all modules when no module is selected", func(t *testing.T) {
+		// ===== Arrange ===== //
+		modules := []Module{
+			{Name: "iam"},
+			{Name: "billing"},
+		}
+
+		// ===== Act ===== //
+		filtered, err := FilterModules(modules, "")
+
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+
+		assert.Equal(t, modules, filtered)
+	})
+
+	t.Run("returns selected module", func(t *testing.T) {
+		// ===== Arrange ===== //
+		modules := []Module{
+			{Name: "iam"},
+			{Name: "billing"},
+		}
+
+		// ===== Act ===== //
+		filtered, err := FilterModules(modules, "iam")
+
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.Equal(t, []Module{{Name: "iam"}}, filtered)
+	})
+
+	t.Run("returns error when module is missing", func(t *testing.T) {
+		// ===== Arrange ===== //
+		modules := []Module{
+			{Name: "iam"},
+			{Name: "billing"},
+		}
+
+		// ===== Act ===== //
+		_, err := FilterModules(modules, "catalog")
+
+		// ===== Assert ===== //
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "module not found: catalog")
 	})
 }

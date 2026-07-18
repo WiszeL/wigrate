@@ -45,7 +45,7 @@ func Test_EnvParse_LoadEnvFile(t *testing.T) {
 			err := loadEnvFile(path)
 
 			// ===== Assert ===== //
-			require.NoError(t, err)
+			assert.NoError(t, err)
 			assert.Equal(t, tt.want, os.Getenv(tt.key))
 		})
 	}
@@ -59,7 +59,7 @@ func Test_EnvParse_LoadEnvFile(t *testing.T) {
 		err := loadEnvFile(path)
 
 		// ===== Assert ===== //
-		require.NoError(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, "existing", os.Getenv("KEY"))
 	})
 
