@@ -8,6 +8,8 @@ import (
 	"strconv"
 
 	"github.com/wiszel/wigrate/internal"
+	"github.com/wiszel/wigrate/internal/migrate"
+	"github.com/wiszel/wigrate/internal/migration"
 )
 
 type makeMigrationFunc func(bool, ...string) error
@@ -24,10 +26,10 @@ type cliDependencies struct {
 
 func main() {
 	deps := cliDependencies{
-		makeMigration: internal.MakeMigration,
-		migrateUp:     internal.MigrateUp,
-		migrateDown:   internal.MigrateDown,
-		migrateStatus: internal.MigrateStatus,
+		makeMigration: migration.Make,
+		migrateUp:     migrate.Up,
+		migrateDown:   migrate.Down,
+		migrateStatus: migrate.Status,
 	}
 
 	if err := run(os.Args[1:], deps); err != nil {
@@ -85,8 +87,8 @@ func runGen(args []string, makeMigration makeMigrationFunc) error {
 	if flags.NArg() > 0 {
 		return fmt.Errorf("unexpected argument %q", flags.Arg(0))
 	}
-	internal.ModulesDir = *modulesDir
-	internal.DryRun = *dryRun
+	config.ModulesDir = *modulesDir
+	config.DryRun = *dryRun
 	return makeMigration(*overwrite, *moduleName)
 }
 
@@ -98,7 +100,7 @@ func runUp(args []string, migrateUp migrateUpFunc) error {
 	if flags.NArg() > 0 {
 		return fmt.Errorf("unexpected argument %q", flags.Arg(0))
 	}
-	internal.ModulesDir = *modulesDir
+	config.ModulesDir = *modulesDir
 	return migrateUp(*moduleName)
 }
 
@@ -119,7 +121,7 @@ func runDown(args []string, migrateDown migrateDownFunc) error {
 	if err := flags.Parse(args[1:]); err != nil {
 		return err
 	}
-	internal.ModulesDir = *modulesDir
+	config.ModulesDir = *modulesDir
 	return migrateDown(steps, *moduleName)
 }
 
@@ -131,7 +133,7 @@ func runStatus(args []string, migrateStatus migrateStatusFunc) error {
 	if flags.NArg() > 0 {
 		return fmt.Errorf("unexpected argument %q", flags.Arg(0))
 	}
-	internal.ModulesDir = *modulesDir
+	config.ModulesDir = *modulesDir
 	return migrateStatus(*moduleName)
 }
 

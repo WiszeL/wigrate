@@ -1,4 +1,4 @@
-package internal
+package migration
 
 import (
 	"os"
@@ -31,54 +31,6 @@ func Test_IsGoEntityFile(t *testing.T) {
 	}
 }
 
-func Test_Migration_FilterModules(t *testing.T) {
-	t.Run("returns all modules when no module is selected", func(t *testing.T) {
-		// ===== Arrange ===== //
-		modules := []migrationModule{
-			{name: "iam"},
-			{name: "billing"},
-		}
-
-		// ===== Act ===== //
-		filtered, err := filterModules(modules, "")
-
-		// ===== Assert ===== //
-		assert.NoError(t, err)
-
-		assert.Equal(t, modules, filtered)
-	})
-
-	t.Run("returns selected module", func(t *testing.T) {
-		// ===== Arrange ===== //
-		modules := []migrationModule{
-			{name: "iam"},
-			{name: "billing"},
-		}
-
-		// ===== Act ===== //
-		filtered, err := filterModules(modules, "iam")
-
-		// ===== Assert ===== //
-		assert.NoError(t, err)
-		assert.Equal(t, []migrationModule{{name: "iam"}}, filtered)
-	})
-
-	t.Run("returns error when module is missing", func(t *testing.T) {
-		// ===== Arrange ===== //
-		modules := []migrationModule{
-			{name: "iam"},
-			{name: "billing"},
-		}
-
-		// ===== Act ===== //
-		_, err := filterModules(modules, "catalog")
-
-		// ===== Assert ===== //
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "module not found: catalog")
-	})
-}
-
 func Test_LoadIgnoreSet(t *testing.T) {
 	t.Run("returns nil when .wigrateignore is missing", func(t *testing.T) {
 		// ===== Arrange ===== //
@@ -101,7 +53,7 @@ func Test_LoadIgnoreSet(t *testing.T) {
 		set, err := loadIgnoreSet(dir)
 
 		// ===== Assert ===== //
-		require.NoError(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, map[string]struct{}{"session": {}, "cache_entry": {}}, set)
 	})
 }
@@ -118,18 +70,18 @@ type User struct {
 }
 `)
 		// Session is Redis-only: plain (non-DSL) inline comment would otherwise abort generation.
-		require.NoError(t, os.WriteFile(filepath.Join(module.entityDir, "session.go"), []byte(`package entity
+		require.NoError(t, os.WriteFile(filepath.Join(module.EntityDir, "session.go"), []byte(`package entity
 
 type Session struct {
 	ID          string
 	Thumbprint string // DPoP key thumbprint bound at login
 }
 `), 0644))
-		require.NoError(t, os.WriteFile(filepath.Join(module.migrationDir, ".wigrateignore"), []byte("session\n"), 0644))
+		require.NoError(t, os.WriteFile(filepath.Join(module.MigrationDir, ".wigrateignore"), []byte("session\n"), 0644))
 
 		restoreRunCommand := stubRunCommand(t, func(cmd string, args ...string) error {
-			upPath := filepath.Join(module.migrationDir, "000001_init_user.up.sql")
-			downPath := filepath.Join(module.migrationDir, "000001_init_user.down.sql")
+			upPath := filepath.Join(module.MigrationDir, "000001_init_user.up.sql")
+			downPath := filepath.Join(module.MigrationDir, "000001_init_user.down.sql")
 			require.NoError(t, os.WriteFile(upPath, []byte(""), 0644))
 			require.NoError(t, os.WriteFile(downPath, []byte(""), 0644))
 			return nil
@@ -140,10 +92,10 @@ type Session struct {
 		err := makePerModule(module, false)
 
 		// ===== Assert ===== //
-		require.NoError(t, err, "session.go's invalid DSL comment must not abort generation once ignored")
+		assert.NoError(t, err, "session.go's invalid DSL comment must not abort generation once ignored")
 
-		upSQL, readErr := os.ReadFile(filepath.Join(module.migrationDir, "000001_init_user.up.sql"))
-		require.NoError(t, readErr)
+		upSQL, readErr := os.ReadFile(filepath.Join(module.MigrationDir, "000001_init_user.up.sql"))
+		assert.NoError(t, readErr)
 		assert.Contains(t, string(upSQL), "CREATE TABLE users")
 	})
 }

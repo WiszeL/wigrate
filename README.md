@@ -358,10 +358,10 @@ This is passed through the Postgres URL as `x-migrations-table=schema_migrations
 
 ## Schema Diff Algorithm
 
-1. **Read migration history** — Parse migration SQL files to reconstruct current schema state (see `internal/replay.go`)
-2. **Parse current entities** — Read Go struct files via `go/ast` (see `internal/schema.go`)
-3. **Diff** — Compare columns and foreign keys, categorizing changes as added/removed/changed (see `internal/diff.go`)
-4. **Generate SQL** — Produce ALTER TABLE statements from the diff (see `internal/generate.go`)
+1. **Read migration history** — Parse migration SQL files to reconstruct current schema state (see `internal/replay/`)
+2. **Parse current entities** — Read Go struct files via `go/ast` (see `internal/schema/`)
+3. **Diff** — Compare columns and foreign keys, categorizing changes as added/removed/changed (see `internal/diff/`)
+4. **Generate SQL** — Produce ALTER TABLE statements from the diff (see `internal/sqlgen/`, orchestrated by `internal/migration/`)
 5. **Delegate** — Write SQL files and let `golang-migrate` handle execution
 
 ### Column Rename Warning
@@ -387,11 +387,11 @@ This is a safety signal — the diff engine cannot distinguish a rename from a d
 ```
 wigrate gen
   │
-  ├── discover modules (module/<name>/)
-  ├── parse entity structs (go/ast) → tableSchema
-  ├── replay past migrations → existing tableSchema
-  ├── diff (existing vs current) → schemaDiff
-  ├── generate SQL (CREATE/ALTER TABLE)
+  ├── discover modules (module/<name>/)          — internal/discover
+  ├── parse entity structs (go/ast) → schema.Table — internal/schema
+  ├── replay past migrations → existing schema.Table — internal/replay
+  ├── diff (existing vs current) → diff.Result    — internal/diff
+  ├── generate SQL (CREATE/ALTER TABLE)           — internal/sqlgen, internal/migration
   └── delegate to golang-migrate CLI
 
 wigrate up/down/status

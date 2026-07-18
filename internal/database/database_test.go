@@ -1,4 +1,4 @@
-package internal
+package database
 
 import (
 	"os"
@@ -7,7 +7,30 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/wiszel/wigrate/internal/discover"
 )
+
+func Test_Migration_DatabaseURLForModule(t *testing.T) {
+	t.Run("builds escaped postgres url with module migration table", func(t *testing.T) {
+		// ===== Arrange ===== //
+		config := Config{
+			Host:     "localhost",
+			Port:     "5432",
+			Name:     "wibee",
+			User:     "postgres",
+			Password: "secret:with@chars",
+			SSLMode:  "disable",
+		}
+		module := discover.Module{Name: "iam"}
+
+		// ===== Act ===== //
+		databaseURL := config.URLForModule(module)
+
+		// ===== Assert ===== //
+		assert.Equal(t, "postgres://postgres:secret%3Awith%40chars@localhost:5432/wibee?sslmode=disable&x-migrations-table=schema_migrations_iam", databaseURL)
+	})
+}
 
 func Test_Migration_LoadDatabaseConfig(t *testing.T) {
 	t.Run("loads from .env file", func(t *testing.T) {
@@ -23,7 +46,7 @@ func Test_Migration_LoadDatabaseConfig(t *testing.T) {
 		`), 0644))
 
 		// ===== Act ===== //
-		config, err := loadDatabaseConfig(root)
+		config, err := Load(root)
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)
@@ -49,11 +72,17 @@ func Test_Migration_LoadDatabaseConfig(t *testing.T) {
 		`), 0644))
 
 		// ===== Act ===== //
-		config, err := loadDatabaseConfig(root)
+		config, err := Load(root)
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)
-		assert.Equal(t, "from_env", config.Name)
+		expected := Config{Host: "localhost", Port: "5432", Name: "from_env", User: "postgres", Password: "secret", SSLMode: "disable"}
+		assert.Equal(t, expected.Host, config.Host)
+		assert.Equal(t, expected.Port, config.Port)
+		assert.Equal(t, expected.Name, config.Name)
+		assert.Equal(t, expected.User, config.User)
+		assert.Equal(t, expected.Password, config.Password)
+		assert.Equal(t, expected.SSLMode, config.SSLMode)
 	})
 
 	t.Run("missing .env is not an error if env vars are set", func(t *testing.T) {
@@ -65,11 +94,17 @@ func Test_Migration_LoadDatabaseConfig(t *testing.T) {
 		t.Setenv("DB_PASSWORD", "secret")
 
 		// ===== Act ===== //
-		config, err := loadDatabaseConfig(t.TempDir())
+		config, err := Load(t.TempDir())
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)
-		assert.Equal(t, "wibee", config.Name)
+		expected := Config{Host: "localhost", Port: "5432", Name: "wibee", User: "postgres", Password: "secret", SSLMode: "disable"}
+		assert.Equal(t, expected.Host, config.Host)
+		assert.Equal(t, expected.Port, config.Port)
+		assert.Equal(t, expected.Name, config.Name)
+		assert.Equal(t, expected.User, config.User)
+		assert.Equal(t, expected.Password, config.Password)
+		assert.Equal(t, expected.SSLMode, config.SSLMode)
 	})
 
 	t.Run("returns error when required env missing", func(t *testing.T) {
@@ -82,7 +117,7 @@ func Test_Migration_LoadDatabaseConfig(t *testing.T) {
 		`), 0644))
 
 		// ===== Act ===== //
-		_, err := loadDatabaseConfig(root)
+		_, err := Load(root)
 
 		// ===== Assert ===== //
 		assert.Error(t, err)
@@ -90,51 +125,9 @@ func Test_Migration_LoadDatabaseConfig(t *testing.T) {
 	})
 }
 
-func Test_EnvParse_LoadEnvFile(t *testing.T) {
-	write := func(t *testing.T, content string) string {
-		t.Helper()
-		dir := t.TempDir()
-		path := filepath.Join(dir, ".env")
-		require.NoError(t, os.WriteFile(path, []byte(content), 0644))
-		return path
-	}
-
-	tests := []struct {
-		name    string
-		content string
-		key     string
-		want    string
-	}{
-		{"bare value", "KEY=value\n", "KEY", "value"},
-		{"single-quoted value", "KEY='hello world'\n", "KEY", "hello world"},
-		{"double-quoted value", `KEY="hello world"`, "KEY", "hello world"},
-		{"double-quoted with escape", `KEY="say \"hi\""`, "KEY", `say "hi"`},
-		{"export prefix", "export KEY=value\n", "KEY", "value"},
-		{"comment skipped", "# this is a comment\nKEY=value\n", "KEY", "value"},
-		{"blank line skipped", "\n\nKEY=value\n", "KEY", "value"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv(tt.key, "")
-			os.Unsetenv(tt.key)
-			require.NoError(t, loadEnvFile(write(t, tt.content)))
-			assert.Equal(t, tt.want, os.Getenv(tt.key))
-		})
-	}
-
-	t.Run("existing env not overwritten", func(t *testing.T) {
-		t.Setenv("KEY", "existing")
-		path := write(t, "KEY=from_file\n")
-		require.NoError(t, loadEnvFile(path))
-		assert.Equal(t, "existing", os.Getenv("KEY"))
-	})
-
-	t.Run("missing file is not an error", func(t *testing.T) {
-		assert.NoError(t, loadEnvFile("/tmp/nonexistent_wigrate_test.env"))
-	})
-}
-
+// unsetDatabaseEnv is shared test setup for any test in this package that
+// needs a clean DB_* environment; also used by migrate_test.go's fixture
+// helpers via its own local copy (packages don't share test-only code).
 func unsetDatabaseEnv(t *testing.T) {
 	t.Helper()
 
@@ -149,25 +142,4 @@ func unsetDatabaseEnv(t *testing.T) {
 			assert.NoError(t, os.Unsetenv(key))
 		})
 	}
-}
-
-func Test_Migration_DatabaseURLForModule(t *testing.T) {
-	t.Run("builds escaped postgres url with module migration table", func(t *testing.T) {
-		// ===== Arrange ===== //
-		config := databaseConfig{
-			Host:     "localhost",
-			Port:     "5432",
-			Name:     "wibee",
-			User:     "postgres",
-			Password: "secret:with@chars",
-			SSLMode:  "disable",
-		}
-		module := migrationModule{name: "iam"}
-
-		// ===== Act ===== //
-		databaseURL := config.urlForModule(module)
-
-		// ===== Assert ===== //
-		assert.Equal(t, "postgres://postgres:secret%3Awith%40chars@localhost:5432/wibee?sslmode=disable&x-migrations-table=schema_migrations_iam", databaseURL)
-	})
 }
