@@ -69,6 +69,12 @@ func makePerModule(module discover.Module, overwriteLatest bool) error {
 		return err
 	}
 
+	// Building the set of tables this module actually owns, to gate FK detection
+	moduleTables, err := moduleTableSet(module, entityEntries, ignore)
+	if err != nil {
+		return err
+	}
+
 	// Generating migration per entity
 	for _, entry := range entityEntries {
 		if !isGoEntityFile(entry.Name()) {
@@ -89,12 +95,44 @@ func makePerModule(module discover.Module, overwriteLatest bool) error {
 			continue
 		}
 
-		if err := generateMigrationForEntity(module, migrationEntries, entry.Name(), overwriteLatest); err != nil {
+		if err := generateMigrationForEntity(module, migrationEntries, entry.Name(), overwriteLatest, moduleTables); err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+
+// moduleTableSet returns the set of table names actually backed by Postgres
+// in this module — real entities, minus .wigrateignore'd ones and struct-less
+// support files (enums). Used to gate FK detection: a field can only get a
+// foreign key if its target table exists in this same set.
+//
+// ponytail: re-parses each entity file here and again in the generate loop
+// below; fine for a codegen CLI. Cache if modules ever get large.
+func moduleTableSet(module discover.Module, entries []os.DirEntry, ignore map[string]struct{}) (map[string]struct{}, error) {
+	set := make(map[string]struct{})
+	for _, entry := range entries {
+		if !isGoEntityFile(entry.Name()) {
+			continue
+		}
+
+		name := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
+		if _, skip := ignore[name]; skip {
+			continue
+		}
+
+		isEntity, err := schema.IsEntityFile(module, name)
+		if err != nil {
+			return nil, err
+		}
+		if !isEntity {
+			continue
+		}
+
+		set[schema.TableNameFromEntity(name)] = struct{}{}
+	}
+	return set, nil
 }
 
 // loadIgnoreSet reads .wigrateignore and returns entity names to skip.
@@ -118,7 +156,7 @@ func loadIgnoreSet(migrationDir string) (map[string]struct{}, error) {
 	return set, nil
 }
 
-func generateMigrationForEntity(module discover.Module, entries []os.DirEntry, goName string, overwriteLatest bool) error {
+func generateMigrationForEntity(module discover.Module, entries []os.DirEntry, goName string, overwriteLatest bool, moduleTables map[string]struct{}) error {
 	// Extracting entity name from file
 	entityName := strings.TrimSuffix(goName, filepath.Ext(goName))
 	if entityName == "" {
@@ -129,16 +167,16 @@ func generateMigrationForEntity(module discover.Module, entries []os.DirEntry, g
 
 	// Creating init migration for new entities
 	if latest == nil {
-		return makeInitMigration(module, entityName)
+		return makeInitMigration(module, entityName, moduleTables)
 	}
 
 	// Overwriting latest migration if requested
 	if overwriteLatest {
-		return overwriteLatestMigration(module, entries, entityName, *latest)
+		return overwriteLatestMigration(module, entries, entityName, *latest, moduleTables)
 	}
 
 	// Creating alter migration for existing entities
-	return makeAlterMigration(module, entries, entityName)
+	return makeAlterMigration(module, entries, entityName, moduleTables)
 }
 
 func isGoEntityFile(name string) bool {

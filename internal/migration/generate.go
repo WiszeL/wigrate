@@ -43,9 +43,20 @@ func createMigration(module discover.Module, entityName string, migrationName st
 	return *latest, nil
 }
 
-func makeInitMigration(module discover.Module, entityName string) error {
-	// Parsing entity schema
+// parseTable parses entityName's schema and drops any foreign key whose
+// referenced table isn't part of this module (see pruneForeignKeys).
+func parseTable(module discover.Module, entityName string, moduleTables map[string]struct{}) (schema.Table, error) {
 	table, err := schema.Parse(module, entityName)
+	if err != nil {
+		return table, err
+	}
+	table.ForeignKeys = pruneForeignKeys(table.ForeignKeys, moduleTables, module.Name)
+	return table, nil
+}
+
+func makeInitMigration(module discover.Module, entityName string, moduleTables map[string]struct{}) error {
+	// Parsing entity schema
+	table, err := parseTable(module, entityName, moduleTables)
 	if err != nil {
 		return err
 	}
@@ -58,24 +69,24 @@ func makeInitMigration(module discover.Module, entityName string) error {
 	return writeMigrationFiles(file, sqlgen.CreateTableSQL(table), sqlgen.DropTableSQL(table))
 }
 
-func overwriteLatestMigration(module discover.Module, entries []os.DirEntry, entityName string, latest discover.File) error {
+func overwriteLatestMigration(module discover.Module, entries []os.DirEntry, entityName string, latest discover.File, moduleTables map[string]struct{}) error {
 	switch latest.Kind {
 	case discover.KindInit:
-		table, err := schema.Parse(module, entityName)
+		table, err := parseTable(module, entityName, moduleTables)
 		if err != nil {
 			return err
 		}
 		return writeMigrationFiles(latest, sqlgen.CreateTableSQL(table), sqlgen.DropTableSQL(table))
 	case discover.KindAlter:
-		return overwriteAlterMigration(module, entries, entityName, latest)
+		return overwriteAlterMigration(module, entries, entityName, latest, moduleTables)
 	default:
 		return fmt.Errorf("unknown migration kind %s", latest.Kind)
 	}
 }
 
-func makeAlterMigration(module discover.Module, entries []os.DirEntry, entityName string) error {
+func makeAlterMigration(module discover.Module, entries []os.DirEntry, entityName string, moduleTables map[string]struct{}) error {
 	// Computing schema diff
-	result, err := buildSchemaDiff(module, entries, entityName, nil)
+	result, err := buildSchemaDiff(module, entries, entityName, nil, moduleTables)
 	if err != nil {
 		return err
 	}
@@ -97,9 +108,9 @@ func makeAlterMigration(module discover.Module, entries []os.DirEntry, entityNam
 	return writeMigrationFiles(file, sqlgen.AlterTableSQL(result), sqlgen.RevertAlterTableSQL(result))
 }
 
-func overwriteAlterMigration(module discover.Module, entries []os.DirEntry, entityName string, latest discover.File) error {
+func overwriteAlterMigration(module discover.Module, entries []os.DirEntry, entityName string, latest discover.File, moduleTables map[string]struct{}) error {
 	// Recomputing schema diff for latest migration
-	result, err := buildSchemaDiff(module, entries, entityName, &latest)
+	result, err := buildSchemaDiff(module, entries, entityName, &latest, moduleTables)
 	if err != nil {
 		return err
 	}
@@ -111,8 +122,8 @@ func overwriteAlterMigration(module discover.Module, entries []os.DirEntry, enti
 	return writeMigrationFiles(latest, sqlgen.AlterTableSQL(result), sqlgen.RevertAlterTableSQL(result))
 }
 
-func buildSchemaDiff(module discover.Module, entries []os.DirEntry, entityName string, before *discover.File) (diff.Result, error) {
-	current, err := schema.Parse(module, entityName)
+func buildSchemaDiff(module discover.Module, entries []os.DirEntry, entityName string, before *discover.File, moduleTables map[string]struct{}) (diff.Result, error) {
+	current, err := parseTable(module, entityName, moduleTables)
 	if err != nil {
 		return diff.Result{}, err
 	}

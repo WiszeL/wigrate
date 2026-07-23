@@ -58,6 +58,58 @@ func Test_LoadIgnoreSet(t *testing.T) {
 	})
 }
 
+func Test_ModuleTableSet(t *testing.T) {
+	t.Run("includes real entities, excludes ignored and struct-less support files", func(t *testing.T) {
+		// ===== Arrange ===== //
+		module := makeTestMigrationModule(t, "iam", "user.go", `package entity
+
+import "github.com/google/uuid"
+
+type User struct {
+	ID uuid.UUID
+}
+`)
+		require.NoError(t, os.WriteFile(filepath.Join(module.EntityDir, "role.go"), []byte(`package entity
+
+import "github.com/google/uuid"
+
+type Role struct {
+	ID uuid.UUID
+}
+`), 0644))
+		// session is a real struct but ignored via .wigrateignore (e.g. Redis-only).
+		require.NoError(t, os.WriteFile(filepath.Join(module.EntityDir, "session.go"), []byte(`package entity
+
+import "github.com/google/uuid"
+
+type Session struct {
+	ID uuid.UUID
+}
+`), 0644))
+		// permission_level.go declares no struct — a support file (enum), not an entity.
+		require.NoError(t, os.WriteFile(filepath.Join(module.EntityDir, "permission_level.go"), []byte(`package entity
+
+type PermissionLevel int
+
+const (
+	PermissionRead PermissionLevel = iota
+	PermissionWrite
+)
+`), 0644))
+
+		entries, err := os.ReadDir(module.EntityDir)
+		require.NoError(t, err)
+		ignore := map[string]struct{}{"session": {}}
+
+		// ===== Act ===== //
+		set, err := moduleTableSet(module, entries, ignore)
+
+		// ===== Assert ===== //
+		require.NoError(t, err)
+		assert.Equal(t, map[string]struct{}{"users": {}, "roles": {}}, set)
+	})
+}
+
 func Test_MakePerModule_EnumSupportFile(t *testing.T) {
 	t.Run("skips a sibling enum-definition file with no matching struct, without needing .wigrateignore", func(t *testing.T) {
 		// ===== Arrange ===== //

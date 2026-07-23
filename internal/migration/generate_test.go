@@ -37,7 +37,7 @@ type User struct {
 		defer restoreRunCommand()
 
 		// ===== Act ===== //
-		err := makeInitMigration(module, "user")
+		err := makeInitMigration(module, "user", nil)
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)
@@ -79,7 +79,7 @@ type User struct {
 		defer restoreRunCommand()
 
 		// ===== Act ===== //
-		err := makeInitMigration(module, "user")
+		err := makeInitMigration(module, "user", nil)
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)
@@ -126,7 +126,7 @@ type User struct {
 		// ===== Act ===== //
 		entries, err := os.ReadDir(module.MigrationDir)
 		require.NoError(t, err)
-		err = makeAlterMigration(module, entries, "user")
+		err = makeAlterMigration(module, entries, "user", map[string]struct{}{"roles": {}})
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)
@@ -192,7 +192,7 @@ type User struct {
 		// ===== Act ===== //
 		entries, err := os.ReadDir(module.MigrationDir)
 		require.NoError(t, err)
-		err = makeAlterMigration(module, entries, "user")
+		err = makeAlterMigration(module, entries, "user", map[string]struct{}{"teams": {}})
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)
@@ -252,7 +252,7 @@ type User struct {
 		// ===== Act ===== //
 		entries, err := os.ReadDir(module.MigrationDir)
 		require.NoError(t, err)
-		err = makeAlterMigration(module, entries, "user")
+		err = makeAlterMigration(module, entries, "user", nil)
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)
@@ -287,7 +287,7 @@ type User struct {
 		// ===== Act ===== //
 		entries, err := os.ReadDir(module.MigrationDir)
 		require.NoError(t, err)
-		err = overwriteLatestMigration(module, entries, "user", latest)
+		err = overwriteLatestMigration(module, entries, "user", latest, nil)
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)
@@ -339,7 +339,7 @@ type User struct {
 		// ===== Act ===== //
 		entries, err := os.ReadDir(module.MigrationDir)
 		require.NoError(t, err)
-		err = overwriteLatestMigration(module, entries, "user", latest)
+		err = overwriteLatestMigration(module, entries, "user", latest, map[string]struct{}{"roles": {}})
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)
@@ -400,7 +400,7 @@ type User struct {
 		// ===== Act ===== //
 		entries, err := os.ReadDir(module.MigrationDir)
 		require.NoError(t, err)
-		err = overwriteLatestMigration(module, entries, "user", latest)
+		err = overwriteLatestMigration(module, entries, "user", latest, nil)
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)
@@ -439,7 +439,7 @@ type Membership struct {
 		defer restoreRunCommand()
 
 		// ===== Act ===== //
-		err := makeInitMigration(module, "membership")
+		err := makeInitMigration(module, "membership", map[string]struct{}{"roles": {}})
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)
@@ -493,7 +493,7 @@ type Membership struct {
 		// ===== Act ===== //
 		entries, err := os.ReadDir(module.MigrationDir)
 		require.NoError(t, err)
-		err = makeAlterMigration(module, entries, "membership")
+		err = makeAlterMigration(module, entries, "membership", nil)
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)
@@ -535,7 +535,7 @@ type Article struct {
 		defer restoreRunCommand()
 
 		// ===== Act ===== //
-		err := makeInitMigration(module, "article")
+		err := makeInitMigration(module, "article", nil)
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)
@@ -583,7 +583,7 @@ type Article struct {
 		// ===== Act ===== //
 		entries, err := os.ReadDir(module.MigrationDir)
 		require.NoError(t, err)
-		err = makeAlterMigration(module, entries, "article")
+		err = makeAlterMigration(module, entries, "article", nil)
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)
@@ -622,7 +622,7 @@ type Note struct {
 		defer restoreRunCommand()
 
 		// ===== Act ===== //
-		err := makeInitMigration(module, "note")
+		err := makeInitMigration(module, "note", nil)
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)
@@ -673,7 +673,7 @@ type Note struct {
 		// ===== Act ===== //
 		entries, err := os.ReadDir(module.MigrationDir)
 		require.NoError(t, err)
-		err = makeAlterMigration(module, entries, "note")
+		err = makeAlterMigration(module, entries, "note", nil)
 
 		// ===== Assert ===== //
 		assert.NoError(t, err)
