@@ -25,6 +25,7 @@ type Column struct {
 	NotNull  bool
 	Primary  bool
 	Unique   bool
+	Check    string // canonical CHECK IN (...) body for enum fields; "" if not an enum
 }
 
 type ForeignKey struct {
@@ -32,6 +33,23 @@ type ForeignKey struct {
 	RefTable  string
 	RefColumn string
 	OnDelete  string
+}
+
+// IsEntityFile reports whether entityName's file declares a matching struct —
+// i.e. whether it's a real entity, as opposed to a support file sitting in the
+// same entity dir (e.g. an enum's `type X string` + const block, referenced by
+// another entity's field but with no table of its own).
+func IsEntityFile(module discover.Module, entityName string) (bool, error) {
+	entityPath := filepath.Join(module.EntityDir, entityName+".go")
+
+	fileSet := token.NewFileSet()
+	file, err := parser.ParseFile(fileSet, entityPath, nil, 0)
+	if err != nil {
+		return false, err
+	}
+
+	structType, _ := findStruct(file, entityName)
+	return structType != nil, nil
 }
 
 func Parse(module discover.Module, entityName string) (Table, error) {
@@ -51,13 +69,20 @@ func Parse(module discover.Module, entityName string) (Table, error) {
 		return Table{}, fmt.Errorf("entity struct for %s not found in %s", entityName, entityPath)
 	}
 
+	// Scanning sibling files in the entity dir for local enum types (named
+	// string/int types with a const block)
+	enums, err := scanEnumDefs(module.EntityDir)
+	if err != nil {
+		return Table{}, err
+	}
+
 	table := Table{Name: TableNameFromEntity(entityName)}
 
 	// Mapping fields to table schema
 	var uniqueGroups []string // parallel to table.Columns; "" = no group
 	var indexDirectives []fieldIndex
 	for _, field := range structType.Fields.List {
-		columns, foreignKeys, groups, indexes, err := mapStructFieldToSchema(structName, field)
+		columns, foreignKeys, groups, indexes, err := mapStructFieldToSchema(structName, field, enums)
 		if err != nil {
 			return Table{}, err
 		}

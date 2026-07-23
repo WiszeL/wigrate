@@ -58,6 +58,51 @@ func Test_LoadIgnoreSet(t *testing.T) {
 	})
 }
 
+func Test_MakePerModule_EnumSupportFile(t *testing.T) {
+	t.Run("skips a sibling enum-definition file with no matching struct, without needing .wigrateignore", func(t *testing.T) {
+		// ===== Arrange ===== //
+		module := makeTestMigrationModule(t, "billing", "payment.go", `package entity
+
+import "github.com/google/uuid"
+
+type Payment struct {
+	ID     uuid.UUID
+	Status PaymentStatus
+}
+`)
+		// payment_status.go declares no struct — it's a support file for the
+		// enum, not an entity of its own, and must not need .wigrateignore.
+		require.NoError(t, os.WriteFile(filepath.Join(module.EntityDir, "payment_status.go"), []byte(`package entity
+
+type PaymentStatus string
+
+const (
+	PaymentPending PaymentStatus = "pending"
+	PaymentPaid    PaymentStatus = "paid"
+)
+`), 0644))
+
+		restoreRunCommand := stubRunCommand(t, func(cmd string, args ...string) error {
+			upPath := filepath.Join(module.MigrationDir, "000001_init_payment.up.sql")
+			downPath := filepath.Join(module.MigrationDir, "000001_init_payment.down.sql")
+			require.NoError(t, os.WriteFile(upPath, []byte(""), 0644))
+			require.NoError(t, os.WriteFile(downPath, []byte(""), 0644))
+			return nil
+		})
+		defer restoreRunCommand()
+
+		// ===== Act ===== //
+		err := makePerModule(module, false)
+
+		// ===== Assert ===== //
+		assert.NoError(t, err, "a struct-less sibling file must be skipped, not treated as a broken entity")
+
+		upSQL, readErr := os.ReadFile(filepath.Join(module.MigrationDir, "000001_init_payment.up.sql"))
+		assert.NoError(t, readErr)
+		assert.Contains(t, string(upSQL), "CREATE TABLE payments")
+	})
+}
+
 func Test_MakePerModule_WigrateIgnore(t *testing.T) {
 	t.Run("skips entities listed in .wigrateignore", func(t *testing.T) {
 		// ===== Arrange ===== //

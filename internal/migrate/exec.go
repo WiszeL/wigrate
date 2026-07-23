@@ -26,7 +26,8 @@ func runMigrateCommand(module discover.Module, dbConfig database.Config, directi
 
 	// Executing the migrate command
 	if err := config.RunCommandFunc("migrate", args...); err != nil {
-		if isNoChangeError(err) {
+		// golang-migrate returns this exact error text when there's nothing to apply
+		if strings.Contains(strings.ToLower(err.Error()), "no change") {
 			return nil
 		}
 
@@ -60,9 +61,4 @@ func hasMigrationFiles(module discover.Module) (bool, error) {
 	}
 
 	return false, nil
-}
-
-// isNoChangeError checks if the error indicates no migrations were applied.
-func isNoChangeError(err error) bool {
-	return strings.Contains(strings.ToLower(err.Error()), "no change")
 }

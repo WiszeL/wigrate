@@ -69,13 +69,9 @@ func (config Config) URLForModule(module discover.Module) string {
 	// Adding query parameters
 	query := postgresURL.Query()
 	query.Set("sslmode", config.SSLMode)
-	query.Set("x-migrations-table", migrationTableName(module.Name))
+	// Per-module tracking table avoids version collisions between modules
+	query.Set("x-migrations-table", "schema_migrations_"+module.Name)
 	postgresURL.RawQuery = query.Encode()
 
 	return postgresURL.String()
-}
-
-// migrationTableName returns the migration history table name for a module.
-func migrationTableName(moduleName string) string {
-	return "schema_migrations_" + moduleName
 }

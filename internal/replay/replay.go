@@ -71,26 +71,27 @@ func applyGeneratedSQL(table *schema.Table, sql string) {
 			if cols, ok := parseGeneratedColumnList(strings.TrimPrefix(line, "PRIMARY KEY ")); ok {
 				table.PrimaryKey = cols
 			}
-		case strings.HasPrefix(line, "ADD CONSTRAINT ") && strings.Contains(line, " UNIQUE "):
-			if cols, ok := parseGeneratedUniqueConstraint(line); ok {
-				applyGeneratedUniqueConstraint(table, cols)
-			}
-		case strings.HasPrefix(line, "CONSTRAINT ") && strings.Contains(line, " UNIQUE "):
+		case isConstraintLine(line) && strings.Contains(line, " UNIQUE "):
 			if cols, ok := parseGeneratedUniqueConstraint(line); ok {
 				applyGeneratedUniqueConstraint(table, cols)
 			}
 		case strings.HasPrefix(line, "CONSTRAINT ") && strings.Contains(line, " FOREIGN KEY "):
-			if fk, ok := parseGeneratedAlterForeignKey(line); ok {
+			if fk, ok := parseGeneratedForeignKey(line); ok {
 				appendForeignKeyIfMissing(table, fk)
 			}
+		case isConstraintLine(line) && strings.Contains(line, " CHECK ("):
+			if col, body, ok := parseGeneratedCheckConstraint(line); ok {
+				applyGeneratedCheckConstraint(table, col, body)
+			}
 		case strings.HasPrefix(line, "ADD CONSTRAINT "):
-			if fk, ok := parseGeneratedAlterForeignKey(line); ok {
+			if fk, ok := parseGeneratedForeignKey(line); ok {
 				appendForeignKeyIfMissing(table, fk)
 			}
 		case strings.HasPrefix(line, "DROP CONSTRAINT IF EXISTS "):
 			constraintName := strings.TrimPrefix(line, "DROP CONSTRAINT IF EXISTS ")
 			removeForeignKeyByConstraintName(table, constraintName)
 			removeUniqueByConstraintName(table, constraintName)
+			clearCheckByConstraintName(table, constraintName)
 		case strings.HasPrefix(line, "CREATE INDEX ") && strings.Contains(line, "USING GIN"):
 			if col, ok := parseGeneratedTrgmIndex(line); ok {
 				applyGeneratedTrgmIndex(table, col)
@@ -117,6 +118,13 @@ func applyGeneratedSQL(table *schema.Table, sql string) {
 			}
 		}
 	}
+}
+
+// A constraint line inside CREATE TABLE reads "CONSTRAINT ...", inside ALTER
+// TABLE it reads "ADD CONSTRAINT ..." — both forms carry UNIQUE/CHECK/FOREIGN
+// KEY constraints identically, only the prefix differs.
+func isConstraintLine(line string) bool {
+	return strings.HasPrefix(line, "CONSTRAINT ") || strings.HasPrefix(line, "ADD CONSTRAINT ")
 }
 
 // Stripping whitespace and trailing punctuation.

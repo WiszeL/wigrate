@@ -71,6 +71,26 @@ func TestReplayApplySQL(t *testing.T) {
 		assert.Equal(t, schema.ForeignKey{Column: "user_id", RefTable: "users", RefColumn: "id", OnDelete: "CASCADE"}, s.ForeignKeys[0])
 	})
 
+	t.Run("createTable with enum CHECK constraint", func(t *testing.T) {
+		// ===== Arrange ===== //
+		s := &schema.Table{Name: "payments"}
+
+		// ===== Act ===== //
+		applyGeneratedSQL(s, `CREATE TABLE payments (
+				id UUID PRIMARY KEY,
+				status VARCHAR(7) NOT NULL,
+				CONSTRAINT chk_payments_status CHECK (status IN ('failed','paid','pending'))
+		);
+		`)
+
+		// ===== Assert ===== //
+		require.Len(t, s.Columns, 2)
+		assert.Equal(t, schema.Column{Name: "id", DataType: "UUID", Primary: true}, s.Columns[0])
+		assert.Equal(t, schema.Column{
+			Name: "status", DataType: "VARCHAR(7)", NotNull: true, Check: "'failed','paid','pending'",
+		}, s.Columns[1], "round-trips the same canonical Check body sqlgen produced")
+	})
+
 	t.Run("alterTable", func(t *testing.T) {
 		// ===== Arrange ===== //
 		type tc struct {
@@ -187,6 +207,26 @@ func TestReplayApplySQL(t *testing.T) {
 					assert.Equal(t, expected.RefTable, s.ForeignKeys[0].RefTable)
 					assert.Equal(t, expected.RefColumn, s.ForeignKeys[0].RefColumn)
 					assert.Equal(t, expected.OnDelete, s.ForeignKeys[0].OnDelete)
+				},
+			},
+			{
+				name: "add check",
+				setup: func() *schema.Table {
+					return &schema.Table{Name: "payments", Columns: []schema.Column{{Name: "status", DataType: "VARCHAR(7)"}}}
+				},
+				sql: "ALTER TABLE payments\n    ADD CONSTRAINT chk_payments_status CHECK (status IN ('failed','paid','pending'));\n",
+				check: func(t *testing.T, s *schema.Table) {
+					assert.Equal(t, "'failed','paid','pending'", s.Columns[0].Check)
+				},
+			},
+			{
+				name: "drop check",
+				setup: func() *schema.Table {
+					return &schema.Table{Name: "payments", Columns: []schema.Column{{Name: "status", DataType: "VARCHAR(7)", Check: "'failed','paid','pending'"}}}
+				},
+				sql: "ALTER TABLE payments\n    DROP CONSTRAINT IF EXISTS chk_payments_status;\n",
+				check: func(t *testing.T, s *schema.Table) {
+					assert.Empty(t, s.Columns[0].Check)
 				},
 			},
 			{

@@ -27,6 +27,13 @@ func CreateTableSQL(table schema.Table) string {
 		lines = append(lines, "    CONSTRAINT "+buildUniqueConstraintDefinition(table.Name, cols))
 	}
 
+	// Enum columns get a CHECK constraint
+	for _, column := range table.Columns {
+		if column.Check != "" {
+			lines = append(lines, "    CONSTRAINT "+buildCheckConstraintDefinition(table.Name, column))
+		}
+	}
+
 	// Building foreign keys
 	for _, foreignKey := range table.ForeignKeys {
 		lines = append(lines, "    "+buildCreateForeignKeyDefinition(table.Name, foreignKey))
@@ -132,6 +139,9 @@ func buildAlterUpLines(d diff.Result) []string {
 	// Adding columns
 	for _, column := range d.AddedColumns {
 		lines = append(lines, addColumnLine(column))
+		if column.Check != "" {
+			lines = append(lines, "    ADD CONSTRAINT "+buildCheckConstraintDefinition(d.TableName, column))
+		}
 	}
 
 	// Add constraints after columns exist
@@ -202,6 +212,11 @@ func buildAlterColumnChangeLines(tableName string, before schema.Column, after s
 		lines = append(lines, dropCompositeUniqueLine(tableName, []string{before.Name}))
 	}
 
+	// Dropping the old CHECK before the type/value change (enum values changed or enum removed)
+	if before.Check != "" && before.Check != after.Check {
+		lines = append(lines, "    DROP CONSTRAINT IF EXISTS "+schema.CheckConstraintName(tableName, before.Name))
+	}
+
 	// Changing data type
 	if before.DataType != after.DataType {
 		lines = append(lines, fmt.Sprintf("    ALTER COLUMN %s TYPE %s", after.Name, after.DataType))
@@ -213,6 +228,11 @@ func buildAlterColumnChangeLines(tableName string, before schema.Column, after s
 	// Adding unique
 	if !before.Unique && after.Unique {
 		lines = append(lines, addCompositeUniqueLine(tableName, []string{after.Name}))
+	}
+
+	// Re-adding the CHECK with the new value list (enum values changed or enum added)
+	if after.Check != "" && before.Check != after.Check {
+		lines = append(lines, "    ADD CONSTRAINT "+buildCheckConstraintDefinition(tableName, after))
 	}
 
 	return lines

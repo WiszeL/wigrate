@@ -77,6 +77,22 @@ func applyGeneratedUniqueConstraint(table *schema.Table, columns []string) {
 	table.Uniques = append(table.Uniques, columns)
 }
 
+// Setting a column's enum CHECK body (add or replace).
+func applyGeneratedCheckConstraint(table *schema.Table, columnName string, checkBody string) {
+	updateColumn(table, columnName, func(column *schema.Column) {
+		column.Check = checkBody
+	})
+}
+
+// Clearing a column's CHECK body by its constraint name.
+func clearCheckByConstraintName(table *schema.Table, constraintName string) {
+	if i := slices.IndexFunc(table.Columns, func(col schema.Column) bool {
+		return col.Check != "" && schema.CheckConstraintName(table.Name, col.Name) == constraintName
+	}); i >= 0 {
+		table.Columns[i].Check = ""
+	}
+}
+
 // Adding an index if it doesn't already exist.
 func applyGeneratedIndex(table *schema.Table, columns []string) {
 	name := schema.IndexName(table.Name, columns)

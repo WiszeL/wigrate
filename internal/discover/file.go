@@ -1,7 +1,6 @@
 package discover
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,15 +18,6 @@ type File struct {
 	BaseName  string
 	Kind      Kind
 	Direction string
-}
-
-func FindEntityMigrationState(module Module, entityName string) (*File, error) {
-	// Reading migration directory
-	entries, err := os.ReadDir(module.MigrationDir)
-	if err != nil {
-		return nil, fmt.Errorf("read migration dir: %w", err)
-	}
-	return LatestMigrationFile(module, entries, entityName), nil
 }
 
 func LatestMigrationFile(module Module, entries []os.DirEntry, entityName string) *File {

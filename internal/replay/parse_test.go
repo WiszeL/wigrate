@@ -65,6 +65,9 @@ func TestReplayFK(t *testing.T) {
 
 	t.Run("parseAlterFK", func(t *testing.T) {
 		// ===== Arrange ===== //
+		// parseGeneratedForeignKey is called directly on the raw ALTER line
+		// (with its ADD CONSTRAINT prefix) — no wrapper needed since it just
+		// scans for the first "(" and " REFERENCES ", prefix-agnostic.
 		tests := []struct {
 			in   string
 			want schema.ForeignKey
@@ -76,7 +79,7 @@ func TestReplayFK(t *testing.T) {
 
 		for _, tt := range tests {
 			// ===== Act ===== //
-			got, ok := parseGeneratedAlterForeignKey(tt.in)
+			got, ok := parseGeneratedForeignKey(tt.in)
 
 			// ===== Assert ===== //
 			assert.Equal(t, tt.ok, ok)

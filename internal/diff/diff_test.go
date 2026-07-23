@@ -508,6 +508,78 @@ func Test_Migration_DiffSchema(t *testing.T) {
 		assert.Contains(t, output, `column "old_name" dropped`)
 	})
 
+	t.Run("surfaces an enum value change as a changed column", func(t *testing.T) {
+		// ===== Arrange ===== //
+		previous := schema.Table{
+			Name:    "payments",
+			Columns: []schema.Column{{Name: "status", DataType: "VARCHAR(7)", NotNull: true, Check: "'paid','pending'"}},
+		}
+		desired := schema.Table{
+			Name:    "payments",
+			Columns: []schema.Column{{Name: "status", DataType: "VARCHAR(7)", NotNull: true, Check: "'paid','pending','refunded'"}},
+		}
+
+		// ===== Act ===== //
+		diff, err := Compute(previous, desired)
+
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		require.Len(t, diff.ChangedColumns, 1, "Check rides the existing whole-struct column comparison, no special-casing needed")
+		assert.Equal(t, "'paid','pending'", diff.ChangedColumns[0].Before.Check)
+		assert.Equal(t, "'paid','pending','refunded'", diff.ChangedColumns[0].After.Check)
+	})
+
+	t.Run("warns when an enum value is removed", func(t *testing.T) {
+		// ===== Arrange ===== //
+		changed := []ColumnChange{{
+			Before: schema.Column{Name: "status", Check: "'failed','paid','pending'"},
+			After:  schema.Column{Name: "status", Check: "'paid','pending'"},
+		}}
+
+		// ===== Act ===== //
+		output := captureStderr(t, func() {
+			warnEnumValueRemoval(changed)
+		})
+
+		// ===== Assert ===== //
+		assert.Contains(t, output, `enum value(s) 'failed' removed from column "status"`)
+	})
+
+	t.Run("enum column with same values in different order produces an empty diff", func(t *testing.T) {
+		// ===== Arrange ===== //
+		previous := schema.Table{
+			Name:    "payments",
+			Columns: []schema.Column{{Name: "status", DataType: "VARCHAR(7)", NotNull: true, Check: "'failed','paid','pending'"}},
+		}
+		desired := schema.Table{
+			Name:    "payments",
+			Columns: []schema.Column{{Name: "status", DataType: "VARCHAR(7)", NotNull: true, Check: "'failed','paid','pending'"}},
+		}
+
+		// ===== Act ===== //
+		diff, err := Compute(previous, desired)
+
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.True(t, diff.Empty(), "canonical (sorted) Check strings must match regardless of source const order")
+	})
+
+	t.Run("does not warn when enum values are only added", func(t *testing.T) {
+		// ===== Arrange ===== //
+		changed := []ColumnChange{{
+			Before: schema.Column{Name: "status", Check: "'paid','pending'"},
+			After:  schema.Column{Name: "status", Check: "'paid','pending','refunded'"},
+		}}
+
+		// ===== Act ===== //
+		output := captureStderr(t, func() {
+			warnEnumValueRemoval(changed)
+		})
+
+		// ===== Assert ===== //
+		assert.Empty(t, output)
+	})
+
 	t.Run("rejects composite primary key changes", func(t *testing.T) {
 		// ===== Arrange ===== //
 		previous := schema.Table{Name: "memberships", PrimaryKey: []string{"team", "user"}}

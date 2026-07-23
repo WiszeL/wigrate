@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/wiszel/wigrate/internal/discover"
+	"github.com/wiszel/wigrate/internal/schema"
 )
 
 func Make(overwriteLatest bool, moduleNames ...string) error {
@@ -76,6 +77,15 @@ func makePerModule(module discover.Module, overwriteLatest bool) error {
 
 		entityName := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
 		if _, skip := ignore[entityName]; skip {
+			continue
+		}
+
+		// Skipping support files (e.g. an enum's type+const block) that declare no matching struct
+		isEntity, err := schema.IsEntityFile(module, entityName)
+		if err != nil {
+			return err
+		}
+		if !isEntity {
 			continue
 		}
 

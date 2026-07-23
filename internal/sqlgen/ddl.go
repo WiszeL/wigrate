@@ -45,15 +45,13 @@ func buildColumnDefinition(column schema.Column) string {
 }
 
 func buildCreateForeignKeyDefinition(tableName string, foreignKey schema.ForeignKey) string {
-	return "CONSTRAINT " + schema.ForeignKeyConstraintName(tableName, foreignKey.Column) +
+	definition := "CONSTRAINT " + schema.ForeignKeyConstraintName(tableName, foreignKey.Column) +
 		" FOREIGN KEY (" + foreignKey.Column + ") REFERENCES " +
-		foreignKey.RefTable + "(" + foreignKey.RefColumn + ")" +
-		func() string {
-			if foreignKey.OnDelete != "" {
-				return " ON DELETE " + foreignKey.OnDelete
-			}
-			return ""
-		}()
+		foreignKey.RefTable + "(" + foreignKey.RefColumn + ")"
+	if foreignKey.OnDelete != "" {
+		definition += " ON DELETE " + foreignKey.OnDelete
+	}
+	return definition
 }
 
 func buildAlterColumnNullLine(before schema.Column, after schema.Column) []string {
@@ -69,6 +67,10 @@ func buildAlterColumnNullLine(before schema.Column, after schema.Column) []strin
 
 func buildUniqueConstraintDefinition(tableName string, columns []string) string {
 	return schema.UniqueConstraintName(tableName, columns...) + " UNIQUE (" + strings.Join(columns, ", ") + ")"
+}
+
+func buildCheckConstraintDefinition(tableName string, column schema.Column) string {
+	return schema.CheckConstraintName(tableName, column.Name) + " CHECK (" + column.Name + " IN (" + column.Check + "))"
 }
 
 func createIndexStmt(tableName string, columns []string) string {

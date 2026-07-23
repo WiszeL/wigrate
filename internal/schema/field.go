@@ -28,7 +28,7 @@ type fieldIndex struct {
 	trgm  bool
 }
 
-func mapStructFieldToSchema(structName string, field *ast.Field) ([]Column, []ForeignKey, []string, []fieldIndex, error) {
+func mapStructFieldToSchema(structName string, field *ast.Field, enums map[string]enumDef) ([]Column, []ForeignKey, []string, []fieldIndex, error) {
 	if len(field.Names) == 0 {
 		return nil, nil, nil, nil, fmt.Errorf("%s: embedded fields are not supported", structName)
 	}
@@ -49,7 +49,7 @@ func mapStructFieldToSchema(structName string, field *ast.Field) ([]Column, []Fo
 			continue
 		}
 
-		column, err := mapFieldToColumn(name.Name, field.Type, comment)
+		column, err := mapFieldToColumn(name.Name, field.Type, comment, enums)
 		if err != nil {
 			return nil, nil, nil, nil, fmt.Errorf("%s.%s: %w", structName, name.Name, err)
 		}
@@ -168,11 +168,22 @@ func normalizeDeleteRule(token string) (string, error) {
 	}
 }
 
-func mapFieldToColumn(fieldName string, expr ast.Expr, comment fieldComment) (Column, error) {
-	// Converting type to SQL
-	dataType, err := goTypeToSQLType(expr, comment)
-	if err != nil {
-		return Column{}, err
+func mapFieldToColumn(fieldName string, expr ast.Expr, comment fieldComment, enums map[string]enumDef) (Column, error) {
+	// Converting type to SQL — enum types (local named string/int with consts)
+	// bypass the normal builtin mapping and carry a CHECK constraint instead
+	var dataType, check string
+	if typeName, ok := enumTypeName(expr); ok {
+		if def, isEnum := enums[typeName]; isEnum {
+			dataType = enumColumnType(def)
+			check = strings.Join(def.values, ",")
+		}
+	}
+	if dataType == "" {
+		var err error
+		dataType, err = goTypeToSQLType(expr, comment)
+		if err != nil {
+			return Column{}, err
+		}
 	}
 
 	// Building column
@@ -184,6 +195,7 @@ func mapFieldToColumn(fieldName string, expr ast.Expr, comment fieldComment) (Co
 		NotNull:  !comment.nullable && !isPointer,
 		Primary:  fieldName == "ID" || comment.primary,
 		Unique:   comment.unique,
+		Check:    check,
 	}
 	if column.Primary {
 		column.NotNull = false

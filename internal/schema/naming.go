@@ -56,12 +56,7 @@ func pluralizeSnakeCase(value string) string {
 }
 
 func isVowel(r rune) bool {
-	switch unicode.ToLower(r) {
-	case 'a', 'e', 'i', 'o', 'u':
-		return true
-	default:
-		return false
-	}
+	return strings.ContainsRune("aeiou", unicode.ToLower(r))
 }
 
 // SQL identifier naming: lives here (not sqlgen) so diff and replay can compute names independently.
@@ -72,6 +67,10 @@ func ForeignKeyConstraintName(tableName string, column string) string {
 
 func UniqueConstraintName(tableName string, columns ...string) string {
 	return "uq_" + tableName + "_" + strings.Join(columns, "_")
+}
+
+func CheckConstraintName(tableName string, column string) string {
+	return "chk_" + tableName + "_" + column
 }
 
 func IndexName(tableName string, columns []string) string {

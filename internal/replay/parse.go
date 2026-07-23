@@ -102,13 +102,27 @@ func parseGeneratedTrgmIndex(line string) (string, bool) {
 	return col, true
 }
 
-func parseGeneratedAlterForeignKey(line string) (schema.ForeignKey, bool) {
-	parts := strings.SplitN(line, " FOREIGN KEY ", 2)
-	if len(parts) != 2 {
-		return schema.ForeignKey{}, false
+// Extracting column name + canonical value list from a CHECK constraint line,
+// e.g. "CONSTRAINT chk_t_c CHECK (c IN ('a','b'))" (CREATE TABLE) or
+// "ADD CONSTRAINT chk_t_c CHECK (c IN ('a','b'))" (ALTER).
+func parseGeneratedCheckConstraint(line string) (columnName string, checkBody string, ok bool) {
+	_, after, found := strings.Cut(line, " CHECK (")
+	if !found || !strings.HasSuffix(after, ")") {
+		return "", "", false
+	}
+	inner := strings.TrimSuffix(after, ")")
+
+	column, list, found := strings.Cut(inner, " IN (")
+	if !found || !strings.HasSuffix(list, ")") {
+		return "", "", false
+	}
+	body := strings.TrimSuffix(list, ")")
+	column = strings.TrimSpace(column)
+	if column == "" || body == "" {
+		return "", "", false
 	}
 
-	return parseGeneratedForeignKey("FOREIGN KEY " + parts[1])
+	return column, body, true
 }
 
 func parseGeneratedForeignKey(line string) (schema.ForeignKey, bool) {

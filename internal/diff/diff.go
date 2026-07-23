@@ -77,6 +77,9 @@ func Compute(previous schema.Table, desired schema.Table) (Result, error) {
 	// Warn on potential renames
 	warnColumnRename(diff.RemovedColumns, diff.AddedColumns)
 
+	// Warn on enum values dropped by a changed CHECK constraint
+	warnEnumValueRemoval(diff.ChangedColumns)
+
 	previousForeignKeys := foreignKeysByColumn(previous.ForeignKeys)
 	desiredForeignKeys := foreignKeysByColumn(desired.ForeignKeys)
 
@@ -100,49 +103,19 @@ func Compute(previous schema.Table, desired schema.Table) (Result, error) {
 	}
 
 	// Unique constraints, keyed by name (different column sets get different names)
-	previousUniqueNames := uniqueNameSet(desired.Name, previous.Uniques)
-	desiredUniqueNames := uniqueNameSet(desired.Name, desired.Uniques)
-
-	for _, cols := range desired.Uniques {
-		if _, ok := previousUniqueNames[schema.UniqueConstraintName(desired.Name, cols...)]; !ok {
-			diff.AddedUniques = append(diff.AddedUniques, cols)
-		}
-	}
-	for _, cols := range previous.Uniques {
-		if _, ok := desiredUniqueNames[schema.UniqueConstraintName(desired.Name, cols...)]; !ok {
-			diff.RemovedUniques = append(diff.RemovedUniques, cols)
-		}
-	}
+	diff.AddedUniques, diff.RemovedUniques = diffByName(previous.Uniques, desired.Uniques, func(cols []string) string {
+		return schema.UniqueConstraintName(desired.Name, cols...)
+	})
 
 	// Indexes, keyed by name (different column sets get different names)
-	previousIndexNames := indexNameSet(desired.Name, previous.Indexes)
-	desiredIndexNames := indexNameSet(desired.Name, desired.Indexes)
-
-	for _, cols := range desired.Indexes {
-		if _, ok := previousIndexNames[schema.IndexName(desired.Name, cols)]; !ok {
-			diff.AddedIndexes = append(diff.AddedIndexes, cols)
-		}
-	}
-	for _, cols := range previous.Indexes {
-		if _, ok := desiredIndexNames[schema.IndexName(desired.Name, cols)]; !ok {
-			diff.RemovedIndexes = append(diff.RemovedIndexes, cols)
-		}
-	}
+	diff.AddedIndexes, diff.RemovedIndexes = diffByName(previous.Indexes, desired.Indexes, func(cols []string) string {
+		return schema.IndexName(desired.Name, cols)
+	})
 
 	// Trigram indexes, keyed by name to avoid collision with plain indexes
-	previousTrgmNames := trgmNameSet(desired.Name, previous.TrgmIndexes)
-	desiredTrgmNames := trgmNameSet(desired.Name, desired.TrgmIndexes)
-
-	for _, col := range desired.TrgmIndexes {
-		if _, ok := previousTrgmNames[schema.TrgmIndexName(desired.Name, col)]; !ok {
-			diff.AddedTrgmIndexes = append(diff.AddedTrgmIndexes, col)
-		}
-	}
-	for _, col := range previous.TrgmIndexes {
-		if _, ok := desiredTrgmNames[schema.TrgmIndexName(desired.Name, col)]; !ok {
-			diff.RemovedTrgmIndexes = append(diff.RemovedTrgmIndexes, col)
-		}
-	}
+	diff.AddedTrgmIndexes, diff.RemovedTrgmIndexes = diffByName(previous.TrgmIndexes, desired.TrgmIndexes, func(col string) string {
+		return schema.TrgmIndexName(desired.Name, col)
+	})
 
 	return diff, nil
 }

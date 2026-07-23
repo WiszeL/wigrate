@@ -298,6 +298,227 @@ type Product struct {
 		assert.False(t, schema.Columns[1].NotNull)
 		assert.Equal(t, "VARCHAR(50)", schema.Columns[1].DataType)
 	})
+
+	t.Run("recognizes local named string type with consts as an enum field", func(t *testing.T) {
+		// ===== Arrange ===== //
+		module := makeTestMigrationModuleFiles(t, "billing", map[string]string{
+			"payment.go": `package entity
+
+import "github.com/google/uuid"
+
+type Payment struct {
+	ID     uuid.UUID
+	Status PaymentStatus
+}
+`,
+			"payment_status.go": `package entity
+
+type PaymentStatus string
+
+const (
+	PaymentPending PaymentStatus = "pending"
+	PaymentPaid    PaymentStatus = "paid"
+	PaymentFailed  PaymentStatus = "failed"
+)
+`,
+		})
+
+		// ===== Act ===== //
+		schema, err := Parse(module, "payment")
+
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		require.Len(t, schema.Columns, 2)
+		status := schema.Columns[1]
+		assert.Equal(t, "status", status.Name)
+		assert.Equal(t, "VARCHAR(7)", status.DataType, "sized to longest label 'pending'")
+		assert.Equal(t, "'failed','paid','pending'", status.Check, "canonical: sorted lexically regardless of const order")
+		assert.True(t, status.NotNull)
+	})
+
+	t.Run("recognizes local named int type with iota consts as an enum field", func(t *testing.T) {
+		// ===== Arrange ===== //
+		module := makeTestMigrationModuleFiles(t, "billing", map[string]string{
+			"invoice.go": `package entity
+
+import "github.com/google/uuid"
+
+type Invoice struct {
+	ID       uuid.UUID
+	Priority InvoicePriority
+}
+`,
+			"invoice_priority.go": `package entity
+
+type InvoicePriority int
+
+const (
+	PriorityLow InvoicePriority = iota
+	PriorityMedium
+	PriorityHigh
+)
+`,
+		})
+
+		// ===== Act ===== //
+		schema, err := Parse(module, "invoice")
+
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		require.Len(t, schema.Columns, 2)
+		priority := schema.Columns[1]
+		assert.Equal(t, "priority", priority.Name)
+		assert.Equal(t, "INTEGER", priority.DataType)
+		assert.Equal(t, "0,1,2", priority.Check)
+	})
+
+	t.Run("recognizes local named int64 type with explicit consts as an enum field", func(t *testing.T) {
+		// ===== Arrange ===== //
+		module := makeTestMigrationModuleFiles(t, "billing", map[string]string{
+			"ticket.go": `package entity
+
+import "github.com/google/uuid"
+
+type Ticket struct {
+	ID       uuid.UUID
+	Severity TicketSeverity
+}
+`,
+			"ticket_severity.go": `package entity
+
+type TicketSeverity int64
+
+const (
+	SeverityLow    TicketSeverity = 1
+	SeverityMedium TicketSeverity = 5
+	SeverityHigh   TicketSeverity = 9
+)
+`,
+		})
+
+		// ===== Act ===== //
+		schema, err := Parse(module, "ticket")
+
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		require.Len(t, schema.Columns, 2)
+		severity := schema.Columns[1]
+		assert.Equal(t, "severity", severity.Name)
+		assert.Equal(t, "BIGINT", severity.DataType)
+		assert.Equal(t, "1,5,9", severity.Check, "explicit non-contiguous values preserved, sorted numerically")
+	})
+
+	t.Run("named type with no const block is still an unsupported field type", func(t *testing.T) {
+		// ===== Arrange ===== //
+		module := makeTestMigrationModuleFiles(t, "billing", map[string]string{
+			"widget.go": `package entity
+
+import "github.com/google/uuid"
+
+type Widget struct {
+	ID   uuid.UUID
+	Kind WidgetKind
+}
+`,
+			"widget_kind.go": `package entity
+
+type WidgetKind string
+`,
+		})
+
+		// ===== Act ===== //
+		_, err := Parse(module, "widget")
+
+		// ===== Assert ===== //
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "unsupported field type WidgetKind")
+	})
+
+	t.Run("rejects enum const expressions beyond bare iota and literals", func(t *testing.T) {
+		// ===== Arrange ===== //
+		module := makeTestMigrationModuleFiles(t, "billing", map[string]string{
+			"flag.go": `package entity
+
+import "github.com/google/uuid"
+
+type Flag struct {
+	ID   uuid.UUID
+	Bits FlagBits
+}
+`,
+			"flag_bits.go": `package entity
+
+type FlagBits int
+
+const (
+	FlagNone FlagBits = 1 << iota
+	FlagSome
+)
+`,
+		})
+
+		// ===== Act ===== //
+		_, err := Parse(module, "flag")
+
+		// ===== Assert ===== //
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "unsupported enum const expression")
+	})
+
+	t.Run("reordering enum consts produces the same canonical Check", func(t *testing.T) {
+		// ===== Arrange ===== //
+		moduleA := makeTestMigrationModuleFiles(t, "billing", map[string]string{
+			"payment.go": `package entity
+
+import "github.com/google/uuid"
+
+type Payment struct {
+	ID     uuid.UUID
+	Status PaymentStatus
+}
+`,
+			"payment_status.go": `package entity
+
+type PaymentStatus string
+
+const (
+	PaymentPending PaymentStatus = "pending"
+	PaymentPaid    PaymentStatus = "paid"
+	PaymentFailed  PaymentStatus = "failed"
+)
+`,
+		})
+		moduleB := makeTestMigrationModuleFiles(t, "billing", map[string]string{
+			"payment.go": `package entity
+
+import "github.com/google/uuid"
+
+type Payment struct {
+	ID     uuid.UUID
+	Status PaymentStatus
+}
+`,
+			"payment_status.go": `package entity
+
+type PaymentStatus string
+
+const (
+	PaymentFailed  PaymentStatus = "failed"
+	PaymentPaid    PaymentStatus = "paid"
+	PaymentPending PaymentStatus = "pending"
+)
+`,
+		})
+
+		// ===== Act ===== //
+		schemaA, errA := Parse(moduleA, "payment")
+		schemaB, errB := Parse(moduleB, "payment")
+
+		// ===== Assert ===== //
+		assert.NoError(t, errA)
+		assert.NoError(t, errB)
+		assert.Equal(t, schemaA.Columns, schemaB.Columns, "const declaration order must not affect generated SQL")
+	})
 }
 
 func makeTestMigrationModule(t *testing.T, moduleName string, entityFile string, entitySource string) discover.Module {
@@ -309,6 +530,27 @@ func makeTestMigrationModule(t *testing.T, moduleName string, entityFile string,
 	assert.NoError(t, os.MkdirAll(entityDir, 0755))
 	assert.NoError(t, os.MkdirAll(migrationDir, 0755))
 	assert.NoError(t, os.WriteFile(filepath.Join(entityDir, entityFile), []byte(entitySource), 0644))
+
+	return discover.Module{
+		Name:         moduleName,
+		EntityDir:    entityDir,
+		MigrationDir: migrationDir,
+	}
+}
+
+// makeTestMigrationModuleFiles is like makeTestMigrationModule but writes several
+// entity-dir files at once (e.g. an entity struct plus a sibling enum-definition file).
+func makeTestMigrationModuleFiles(t *testing.T, moduleName string, files map[string]string) discover.Module {
+	t.Helper()
+
+	root := t.TempDir()
+	entityDir := filepath.Join(root, "module", moduleName, "internal", "domain", "entity")
+	migrationDir := filepath.Join(root, "module", moduleName, "migration")
+	assert.NoError(t, os.MkdirAll(entityDir, 0755))
+	assert.NoError(t, os.MkdirAll(migrationDir, 0755))
+	for name, source := range files {
+		assert.NoError(t, os.WriteFile(filepath.Join(entityDir, name), []byte(source), 0644))
+	}
 
 	return discover.Module{
 		Name:         moduleName,

@@ -31,10 +31,11 @@ func createMigration(module discover.Module, entityName string, migrationName st
 	}
 
 	// Reading created migration file from disk
-	latest, err := discover.FindEntityMigrationState(module, entityName)
+	entries, err := os.ReadDir(module.MigrationDir)
 	if err != nil {
-		return discover.File{}, err
+		return discover.File{}, fmt.Errorf("read migration dir: %w", err)
 	}
+	latest := discover.LatestMigrationFile(module, entries, entityName)
 	if latest == nil || latest.Kind != kind {
 		return discover.File{}, fmt.Errorf("created %s migration for entity %s not found", kind, entityName)
 	}

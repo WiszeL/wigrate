@@ -75,32 +75,41 @@ func moduleFlags(name string) (*flag.FlagSet, *string, *string) {
 	return flags, moduleName, modulesDir
 }
 
+// parseModuleFlags parses args and applies --modules-dir to config; shared by
+// every command's flag handling (runDown intentionally skips the NArg check
+// its callers do, since it already consumed args[0] as the step count).
+func parseModuleFlags(flags *flag.FlagSet, args []string, modulesDir *string) error {
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	config.ModulesDir = *modulesDir
+	return nil
+}
+
 func runGen(args []string, makeMigration makeMigrationFunc) error {
 	flags, moduleName, modulesDir := moduleFlags("gen")
 	overwrite := flags.Bool("overwrite", false, "overwrite latest migration")
 	flags.BoolVar(overwrite, "o", false, "overwrite latest migration")
 	dryRun := flags.Bool("dry-run", false, "print what would be generated without writing")
 
-	if err := flags.Parse(args); err != nil {
+	if err := parseModuleFlags(flags, args, modulesDir); err != nil {
 		return err
 	}
 	if flags.NArg() > 0 {
 		return fmt.Errorf("unexpected argument %q", flags.Arg(0))
 	}
-	config.ModulesDir = *modulesDir
 	config.DryRun = *dryRun
 	return makeMigration(*overwrite, *moduleName)
 }
 
 func runUp(args []string, migrateUp migrateUpFunc) error {
 	flags, moduleName, modulesDir := moduleFlags("up")
-	if err := flags.Parse(args); err != nil {
+	if err := parseModuleFlags(flags, args, modulesDir); err != nil {
 		return err
 	}
 	if flags.NArg() > 0 {
 		return fmt.Errorf("unexpected argument %q", flags.Arg(0))
 	}
-	config.ModulesDir = *modulesDir
 	return migrateUp(*moduleName)
 }
 
@@ -118,22 +127,20 @@ func runDown(args []string, migrateDown migrateDownFunc) error {
 	}
 
 	flags, moduleName, modulesDir := moduleFlags("down")
-	if err := flags.Parse(args[1:]); err != nil {
+	if err := parseModuleFlags(flags, args[1:], modulesDir); err != nil {
 		return err
 	}
-	config.ModulesDir = *modulesDir
 	return migrateDown(steps, *moduleName)
 }
 
 func runStatus(args []string, migrateStatus migrateStatusFunc) error {
 	flags, moduleName, modulesDir := moduleFlags("status")
-	if err := flags.Parse(args); err != nil {
+	if err := parseModuleFlags(flags, args, modulesDir); err != nil {
 		return err
 	}
 	if flags.NArg() > 0 {
 		return fmt.Errorf("unexpected argument %q", flags.Arg(0))
 	}
-	config.ModulesDir = *modulesDir
 	return migrateStatus(*moduleName)
 }
 
@@ -197,11 +204,17 @@ Entity field comment DSL (inline, trailing comment only):
     // DPoP key thumbprint bound at login
     Thumbprint string // 100 unique
 
+Enum fields (no DSL token needed): a named Go type with a const block, defined
+anywhere in the entity's directory, is auto-detected as an enum. String enums
+become VARCHAR(n) sized to the longest label; int/iota enums become
+INTEGER/BIGINT. Either way the column gets a CHECK (col IN (...)) constraint.
+
 Naming conventions:
   Struct/field PascalCase -> table/column snake_case, table names pluralized.
   FK column: fk_<table>_<refTable>. Unique constraint: uq_<table>_<column1>_<column2>...
   Index: idx_<table>_<column1>_<column2>...
   Trigram index: idx_<table>_<column>_trgm
+  Enum CHECK: chk_<table>_<column>
 
 Supported Go types: string, int, int32, int64, bool, float32, float64, time.Time, uuid.UUID.
 Limitations: no default-value DSL; PK changes (single or composite) are blocked in alter

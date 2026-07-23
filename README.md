@@ -218,6 +218,49 @@ RoleID uuid.UUID // ref:roles del:restrict   → ON DELETE RESTRICT
 RoleID uuid.UUID // ref:roles del:noaction   → ON DELETE NO ACTION
 ```
 
+### Enum Fields
+
+Give a field a named Go type with a `const` block, defined anywhere in the
+entity's directory, and wigrate treats it as an enum automatically — no DSL
+token needed.
+
+```go
+// payment_status.go
+type PaymentStatus string
+
+const (
+    PaymentPending PaymentStatus = "pending"
+    PaymentPaid    PaymentStatus = "paid"
+    PaymentFailed  PaymentStatus = "failed"
+)
+```
+
+```go
+// payment.go
+type Payment struct {
+    ID     uuid.UUID
+    Status PaymentStatus
+}
+```
+
+```sql
+CREATE TABLE payments (
+    id UUID PRIMARY KEY,
+    status VARCHAR(7) NOT NULL,
+    CONSTRAINT chk_payments_status CHECK (status IN ('failed','paid','pending'))
+);
+```
+
+- **String enum** → `VARCHAR(n)` sized to the longest label, with `CHECK (col
+  IN ('a','b'))`.
+- **Int enum** (`iota` or explicit values) → `INTEGER`/`BIGINT` with `CHECK
+  (col IN (0,1,2))`.
+- Reordering the `const` block never triggers a migration.
+- Adding/removing a value generates an alter migration that updates the
+  `CHECK`. Removing a value also prints a warning — existing rows holding it
+  will fail the migration.
+- Only bare `iota` and literal values are supported (no `1 << iota`).
+
 ---
 
 ## Naming Conventions
@@ -231,6 +274,7 @@ RoleID uuid.UUID // ref:roles del:noaction   → ON DELETE NO ACTION
 | FK constraint name | `fk_<table>_<refTable>` | `fk_users_roles` |
 | Unique constraint name | `uq_<table>_<column>` | `uq_users_email` |
 | Index name | `idx_<table>_<column>` | `idx_users_email` |
+| Enum CHECK constraint name | `chk_<table>_<column>` | `chk_payments_status` |
 
 ### Pluralization Rules
 
@@ -278,6 +322,11 @@ domain entity file itself carries no dependency on the migration tool:
 # module/iam/migration/.wigrateignore
 session
 ```
+
+This is for real entities that just aren't backed by Postgres. A file that declares no
+struct at all — like an enum's `type X string` + `const` block sitting next to the
+entity that uses it — is a support file, not an entity, and is skipped automatically;
+it does not need a `.wigrateignore` entry.
 
 ---
 

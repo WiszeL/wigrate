@@ -128,7 +128,16 @@ func Test_Discover_EntityNameFromFile(t *testing.T) {
 	})
 }
 
-func Test_Discover_FindEntityMigrationState(t *testing.T) {
+// readMigrationEntries is the test-side equivalent of the os.ReadDir call
+// generate.go's createMigration makes before handing entries to LatestMigrationFile.
+func readMigrationEntries(t *testing.T, dir string) []os.DirEntry {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	assert.NoError(t, err)
+	return entries
+}
+
+func Test_Discover_LatestMigrationFile_FromDisk(t *testing.T) {
 	t.Run("finds single init migration", func(t *testing.T) {
 		// ===== Arrange ===== //
 		dir := t.TempDir()
@@ -137,10 +146,9 @@ func Test_Discover_FindEntityMigrationState(t *testing.T) {
 		module := Module{MigrationDir: dir}
 
 		// ===== Act ===== //
-		state, err := FindEntityMigrationState(module, "user")
+		state := LatestMigrationFile(module, readMigrationEntries(t, dir), "user")
 
 		// ===== Assert ===== //
-		assert.NoError(t, err)
 		assert.NotNil(t, state)
 		assert.Equal(t, KindInit, state.Kind)
 		assert.Equal(t, "000001_init_user", state.BaseName)
@@ -155,10 +163,9 @@ func Test_Discover_FindEntityMigrationState(t *testing.T) {
 		module := Module{MigrationDir: dir}
 
 		// ===== Act ===== //
-		state, err := FindEntityMigrationState(module, "user")
+		state := LatestMigrationFile(module, readMigrationEntries(t, dir), "user")
 
 		// ===== Assert ===== //
-		assert.NoError(t, err)
 		assert.NotNil(t, state)
 		assert.Equal(t, "000002_alter_email_user", state.BaseName)
 		assert.Equal(t, KindAlter, state.Kind)
@@ -173,10 +180,9 @@ func Test_Discover_FindEntityMigrationState(t *testing.T) {
 		module := Module{MigrationDir: dir}
 
 		// ===== Act ===== //
-		state, err := FindEntityMigrationState(module, "user")
+		state := LatestMigrationFile(module, readMigrationEntries(t, dir), "user")
 
 		// ===== Assert ===== //
-		assert.NoError(t, err)
 		assert.NotNil(t, state)
 		assert.Equal(t, "up", state.Direction)
 		assert.Equal(t, "000001_init_user", state.BaseName)
@@ -189,10 +195,9 @@ func Test_Discover_FindEntityMigrationState(t *testing.T) {
 		module := Module{MigrationDir: dir}
 
 		// ===== Act ===== //
-		state, err := FindEntityMigrationState(module, "user")
+		state := LatestMigrationFile(module, readMigrationEntries(t, dir), "user")
 
 		// ===== Assert ===== //
-		assert.NoError(t, err)
 		assert.Nil(t, state)
 	})
 
@@ -203,10 +208,9 @@ func Test_Discover_FindEntityMigrationState(t *testing.T) {
 		module := Module{MigrationDir: dir}
 
 		// ===== Act ===== //
-		state, err := FindEntityMigrationState(module, "user")
+		state := LatestMigrationFile(module, readMigrationEntries(t, dir), "user")
 
 		// ===== Assert ===== //
-		assert.NoError(t, err)
 		assert.Nil(t, state)
 	})
 }
