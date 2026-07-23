@@ -155,6 +155,55 @@ const (
 	})
 }
 
+func Test_MakePerModule_ValueObjectSupportFile(t *testing.T) {
+	t.Run("flattens a sibling value-object struct into the entity table and generates no table of its own", func(t *testing.T) {
+		// ===== Arrange ===== //
+		module := makeTestMigrationModule(t, "billing", "payment.go", `package entity
+
+import "github.com/google/uuid"
+
+type Payment struct {
+	ID   uuid.UUID
+	Cust Customer
+}
+`)
+		// customer.go has no primary key — a value object, flattened into
+		// payments, never gets a customers table of its own.
+		require.NoError(t, os.WriteFile(filepath.Join(module.EntityDir, "customer.go"), []byte(`package entity
+
+type Customer struct {
+	Name  string
+	Email string
+}
+`), 0644))
+
+		restoreRunCommand := stubRunCommand(t, func(cmd string, args ...string) error {
+			upPath := filepath.Join(module.MigrationDir, "000001_init_payment.up.sql")
+			downPath := filepath.Join(module.MigrationDir, "000001_init_payment.down.sql")
+			require.NoError(t, os.WriteFile(upPath, []byte(""), 0644))
+			require.NoError(t, os.WriteFile(downPath, []byte(""), 0644))
+			return nil
+		})
+		defer restoreRunCommand()
+
+		// ===== Act ===== //
+		err := makePerModule(module, false)
+
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+
+		upSQL, readErr := os.ReadFile(filepath.Join(module.MigrationDir, "000001_init_payment.up.sql"))
+		assert.NoError(t, readErr)
+		assert.Contains(t, string(upSQL), "CREATE TABLE payments")
+		assert.Contains(t, string(upSQL), "cust_name")
+		assert.Contains(t, string(upSQL), "cust_email")
+		assert.NotContains(t, string(upSQL), "CREATE TABLE customers")
+
+		_, statErr := os.Stat(filepath.Join(module.MigrationDir, "000001_init_customer.up.sql"))
+		assert.True(t, os.IsNotExist(statErr), "value object must not get its own migration file")
+	})
+}
+
 func Test_MakePerModule_WigrateIgnore(t *testing.T) {
 	t.Run("skips entities listed in .wigrateignore", func(t *testing.T) {
 		// ===== Arrange ===== //

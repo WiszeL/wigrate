@@ -261,6 +261,64 @@ CREATE TABLE payments (
   will fail the migration.
 - Only bare `iota` and literal values are supported (no `1 << iota`).
 
+### Value Objects (Custom Struct Fields)
+
+Give a field a type that's a named struct defined anywhere in the entity's
+directory, and — provided that struct declares no primary key of its own —
+wigrate treats it as a **value object** and flattens its fields into the
+parent table, prefixed by the field name:
+
+```go
+// payment.go
+type Payment struct {
+    ID   uuid.UUID
+    Cust Customer
+}
+```
+
+```go
+// customer.go
+type Customer struct {
+    Name  string
+    Email string
+}
+```
+
+```sql
+CREATE TABLE payments (
+    id UUID PRIMARY KEY,
+    cust_name TEXT NOT NULL,
+    cust_email TEXT NOT NULL
+);
+```
+
+- **Prefix is the field name**, not the struct type — `Buyer Customer` and
+  `Seller Customer` on the same entity produce distinct `buyer_*`/`seller_*`
+  columns, never a collision.
+- **Recursive**: a value object can itself hold another value-object field,
+  flattened to any depth (`Buyer.Address.City` → `buyer_address_city`). A
+  struct that references itself, directly or through a cycle, is an error.
+- **Full DSL support inside**: nested fields keep every annotation — `null`,
+  `unique`, `index`, `trgm`, FK detection, enum detection — exactly as if
+  written inline on the parent, just with the prefix applied. `unique:<group>`
+  and `index:<group>` labels are scoped to the value object, so the same group
+  name reused across two value-object fields (or at the parent level) never
+  merges into one wrong constraint.
+- **No DSL on the struct-typed field itself** — `Cust Customer // null` is an
+  error; nullability, uniqueness, etc. belong on the leaf fields inside the
+  value object.
+- **The struct must have no primary key** (no bare `ID` field, no `pk`
+  annotation) — a value object owns no identity, so a would-be `cust_id
+  PRIMARY KEY` on the parent table is rejected as an error. A struct **with**
+  a primary key is a normal entity, not a value object, and referencing it as
+  a field errors rather than silently flattening it.
+- **Same-dir resolution only**, like FK and enum detection — a field typed as
+  a struct from another package is not flattened; it stays an "unsupported
+  field type" error.
+- A struct that's used only as a value object (never has its own primary key)
+  never gets a table of its own, the same way an enum's `type X string` +
+  `const` block never does — no `.wigrateignore` entry needed.
+
 ---
 
 ## Naming Conventions
@@ -425,7 +483,7 @@ This is a safety signal — the diff engine cannot distinguish a rename from a d
 
 - Primary key changes (adding, removing, or changing PK columns — single or composite) are intentionally blocked in alter migrations
 - Composite foreign keys are not supported
-- Supported types: `string`, `int`, `int32`, `int64`, `bool`, `float32`, `float64`, `time.Time`, `uuid.UUID`
+- Supported types: `string`, `int`, `int32`, `int64`, `bool`, `float32`, `float64`, `time.Time`, `uuid.UUID`, plus same-dir named enum and value-object structs
 - Only PostgreSQL is supported as a target
 - No default value support in the inline DSL
 

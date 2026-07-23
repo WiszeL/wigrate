@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -28,45 +29,122 @@ type fieldIndex struct {
 	trgm  bool
 }
 
-func mapStructFieldToSchema(structName string, field *ast.Field, enums map[string]enumDef) ([]Column, []ForeignKey, []string, []fieldIndex, error) {
-	if len(field.Names) == 0 {
-		return nil, nil, nil, nil, fmt.Errorf("%s: embedded fields are not supported", structName)
-	}
-
-	// Parsing field comment
-	comment, err := parseFieldComment(field)
-	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("%s: %w", structName, err)
-	}
-
-	// Mapping exported fields
+// mapStructFieldsToSchema walks every field of structType, mapping each to a
+// column (or, for a same-dir value-object struct field, recursively
+// flattening it into columns prefixed by the field path — e.g. Cust.Name ->
+// cust_name, Buyer.Address.City -> buyer_address_city). Nested VO fields keep
+// full DSL semantics (FK, enum, unique/index groups) as if inlined into the
+// parent, just prefixed and, for unique/index groups, scoped to the prefix so
+// two VO instances never merge into one constraint.
+//
+// allowPrimaryKey is true only for the top-level entity struct; recursing
+// into a value object flips it false — a VO owns no identity, so a bare ID
+// field or pk annotation found there is an error, not a nonsensical
+// PRIMARY KEY on the parent table. visited tracks the chain of value-object
+// type names currently being expanded, to reject a cycle.
+func mapStructFieldsToSchema(structType *ast.StructType, typeName, originPath, columnPrefix string, allowPrimaryKey bool, structs map[string]*ast.StructType, enums map[string]enumDef, visited []string) ([]Column, []ForeignKey, []string, []fieldIndex, []string, error) {
 	var columns []Column
 	var foreignKeys []ForeignKey
 	var groups []string
 	var indexes []fieldIndex
-	for _, name := range field.Names {
-		if !name.IsExported() {
-			continue
+	var origins []string
+
+	for _, field := range structType.Fields.List {
+		if len(field.Names) == 0 {
+			return nil, nil, nil, nil, nil, fmt.Errorf("%s: embedded fields are not supported", typeName)
 		}
 
-		column, err := mapFieldToColumn(name.Name, field.Type, comment, enums)
+		comment, err := parseFieldComment(field)
 		if err != nil {
-			return nil, nil, nil, nil, fmt.Errorf("%s.%s: %w", structName, name.Name, err)
+			return nil, nil, nil, nil, nil, fmt.Errorf("%s: %w", typeName, err)
 		}
-		columns = append(columns, column)
-		groups = append(groups, comment.uniqueGroup)
-		indexes = append(indexes, fieldIndex{on: comment.index || comment.indexGroup != "", group: comment.indexGroup, trgm: comment.trgm})
 
-		foreignKey, ok, err := mapFieldToForeignKey(name.Name, column, comment)
-		if err != nil {
-			return nil, nil, nil, nil, fmt.Errorf("%s.%s: %w", structName, name.Name, err)
-		}
-		if ok {
-			foreignKeys = append(foreignKeys, foreignKey)
+		for _, name := range field.Names {
+			if !name.IsExported() {
+				continue
+			}
+			if !allowPrimaryKey && (name.Name == "ID" || comment.primary) {
+				return nil, nil, nil, nil, nil, fmt.Errorf("%s.%s: a value object cannot declare a primary key", typeName, name.Name)
+			}
+
+			origin := originPath + "." + name.Name
+
+			// A same-dir named struct type flattens into prefixed columns
+			// instead of mapping to a single one.
+			if voStruct, voTypeName, isVO := resolveValueObjectType(field.Type, structs); isVO {
+				if comment != (fieldComment{}) {
+					return nil, nil, nil, nil, nil, fmt.Errorf("%s.%s: DSL annotations are not allowed on a value-object field", typeName, name.Name)
+				}
+				if slices.Contains(visited, voTypeName) {
+					return nil, nil, nil, nil, nil, fmt.Errorf("cyclic value-object reference: %s -> %s", strings.Join(visited, " -> "), voTypeName)
+				}
+				childPrefix := prefixed(columnPrefix, "_", snakeCase(name.Name))
+				cols, fks, grps, idxs, forigins, err := mapStructFieldsToSchema(voStruct, voTypeName, origin, childPrefix, false, structs, enums, append(slices.Clone(visited), voTypeName))
+				if err != nil {
+					return nil, nil, nil, nil, nil, err
+				}
+				columns = append(columns, cols...)
+				foreignKeys = append(foreignKeys, fks...)
+				groups = append(groups, grps...)
+				indexes = append(indexes, idxs...)
+				origins = append(origins, forigins...)
+				continue
+			}
+
+			column, err := mapFieldToColumn(name.Name, field.Type, comment, enums)
+			if err != nil {
+				return nil, nil, nil, nil, nil, fmt.Errorf("%s.%s: %w", typeName, name.Name, err)
+			}
+			column.Name = prefixed(columnPrefix, "_", column.Name)
+			columns = append(columns, column)
+
+			// Unique/index group labels are scoped to the value-object's
+			// column prefix so the same label in two different VO instances
+			// (or at the parent level) never silently merges.
+			group := prefixed(columnPrefix, ".", comment.uniqueGroup)
+			groups = append(groups, group)
+
+			indexGroup := prefixed(columnPrefix, ".", comment.indexGroup)
+			indexes = append(indexes, fieldIndex{on: comment.index || comment.indexGroup != "", group: indexGroup, trgm: comment.trgm})
+			origins = append(origins, origin)
+
+			foreignKey, ok, err := mapFieldToForeignKey(name.Name, column, comment)
+			if err != nil {
+				return nil, nil, nil, nil, nil, fmt.Errorf("%s.%s: %w", typeName, name.Name, err)
+			}
+			if ok {
+				foreignKeys = append(foreignKeys, foreignKey)
+			}
 		}
 	}
 
-	return columns, foreignKeys, groups, indexes, nil
+	return columns, foreignKeys, groups, indexes, origins, nil
+}
+
+// prefixed joins prefix and s with sep, unless either is empty (in which case
+// s is returned unchanged).
+func prefixed(prefix, sep, s string) string {
+	if prefix == "" || s == "" {
+		return s
+	}
+	return prefix + sep + s
+}
+
+// resolveValueObjectType reports whether expr is a bare (non-pointer) local
+// named struct type — a value object eligible for flattening. Pointers and
+// package selectors deliberately don't match: they fall through to the normal
+// scalar path and error as "unsupported field type", matching FK/enum's
+// same-dir-only resolution scope.
+func resolveValueObjectType(expr ast.Expr, structs map[string]*ast.StructType) (*ast.StructType, string, bool) {
+	ident, ok := expr.(*ast.Ident)
+	if !ok {
+		return nil, "", false
+	}
+	structType, ok := structs[ident.Name]
+	if !ok {
+		return nil, "", false
+	}
+	return structType, ident.Name, true
 }
 
 // findStruct finds a struct whose snake_case name matches entityName.

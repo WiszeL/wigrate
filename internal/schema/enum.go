@@ -28,19 +28,51 @@ func isEnumUnderlyingType(name string) bool {
 	}
 }
 
-// scanEnumDefs walks every .go file in the entity directory collecting named
-// string/int types that have an associated const block, so struct fields using
-// them can be recognized as enums.
-func scanEnumDefs(entityDir string) (map[string]enumDef, error) {
+// scanEntityDir walks every .go file in the entity directory once, returning
+// every named struct type declaration (for value-object flattening) alongside
+// the parsed packages (for the enum scan that follows).
+func scanEntityDir(entityDir string) (map[string]*ast.StructType, map[string]*ast.Package, error) {
 	fileSet := token.NewFileSet()
 	// ParseDir is deprecated only over build-tag precision, irrelevant for an
 	// entity dir; the suggested replacement (x/tools/go/packages) would break
-	// this project's zero-runtime-dependency policy.
-	packages, err := parser.ParseDir(fileSet, entityDir, nil, 0)
+	// this project's zero-runtime-dependency policy. ParseComments is required
+	// here — flattened value-object fields carry the same inline DSL as a
+	// top-level entity field, and it's parsed from these AST nodes.
+	packages, err := parser.ParseDir(fileSet, entityDir, nil, parser.ParseComments)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
+	structs := make(map[string]*ast.StructType)
+	for _, pkg := range packages {
+		for _, file := range pkg.Files {
+			for _, decl := range file.Decls {
+				genDecl, ok := decl.(*ast.GenDecl)
+				if !ok || genDecl.Tok != token.TYPE {
+					continue
+				}
+				for _, spec := range genDecl.Specs {
+					typeSpec, ok := spec.(*ast.TypeSpec)
+					if !ok {
+						continue
+					}
+					structType, ok := typeSpec.Type.(*ast.StructType)
+					if !ok {
+						continue
+					}
+					structs[typeSpec.Name.Name] = structType
+				}
+			}
+		}
+	}
+
+	return structs, packages, nil
+}
+
+// scanEnumDefs walks every .go file in the entity directory collecting named
+// string/int types that have an associated const block, so struct fields using
+// them can be recognized as enums.
+func scanEnumDefs(packages map[string]*ast.Package) (map[string]enumDef, error) {
 	// First pass: collect named types whose underlying type is a builtin string/int.
 	underlyings := make(map[string]string)
 	for _, pkg := range packages {

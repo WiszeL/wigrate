@@ -465,6 +465,332 @@ const (
 		assert.Contains(t, err.Error(), "unsupported enum const expression")
 	})
 
+	t.Run("flattens a same-dir value-object struct field into prefixed columns", func(t *testing.T) {
+		// ===== Arrange ===== //
+		module := makeTestMigrationModuleFiles(t, "billing", map[string]string{
+			"payment.go": `package entity
+
+import "github.com/google/uuid"
+
+type Payment struct {
+	ID   uuid.UUID
+	Cust Customer
+}
+`,
+			"customer.go": `package entity
+
+type Customer struct {
+	Name  string
+	Email string
+}
+`,
+		})
+
+		// ===== Act ===== //
+		schema, err := Parse(module, "payment")
+
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.Equal(t, []Column{
+			{Name: "id", DataType: "UUID", Primary: true},
+			{Name: "cust_name", DataType: "TEXT", NotNull: true},
+			{Name: "cust_email", DataType: "TEXT", NotNull: true},
+		}, schema.Columns)
+	})
+
+	t.Run("field name prefixes two value-object fields of the same type without collision", func(t *testing.T) {
+		// ===== Arrange ===== //
+		module := makeTestMigrationModuleFiles(t, "billing", map[string]string{
+			"payment.go": `package entity
+
+import "github.com/google/uuid"
+
+type Payment struct {
+	ID     uuid.UUID
+	Buyer  Customer
+	Seller Customer
+}
+`,
+			"customer.go": `package entity
+
+type Customer struct {
+	Name string
+}
+`,
+		})
+
+		// ===== Act ===== //
+		schema, err := Parse(module, "payment")
+
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.Equal(t, []Column{
+			{Name: "id", DataType: "UUID", Primary: true},
+			{Name: "buyer_name", DataType: "TEXT", NotNull: true},
+			{Name: "seller_name", DataType: "TEXT", NotNull: true},
+		}, schema.Columns)
+	})
+
+	t.Run("recursively flattens a nested value object to any depth", func(t *testing.T) {
+		// ===== Arrange ===== //
+		module := makeTestMigrationModuleFiles(t, "billing", map[string]string{
+			"payment.go": `package entity
+
+import "github.com/google/uuid"
+
+type Payment struct {
+	ID    uuid.UUID
+	Buyer Customer
+}
+`,
+			"customer.go": `package entity
+
+type Customer struct {
+	Address Address
+}
+`,
+			"address.go": `package entity
+
+type Address struct {
+	City string
+}
+`,
+		})
+
+		// ===== Act ===== //
+		schema, err := Parse(module, "payment")
+
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.Equal(t, []Column{
+			{Name: "id", DataType: "UUID", Primary: true},
+			{Name: "buyer_address_city", DataType: "TEXT", NotNull: true},
+		}, schema.Columns)
+	})
+
+	t.Run("errors on a cyclic value-object reference", func(t *testing.T) {
+		// ===== Arrange ===== //
+		module := makeTestMigrationModuleFiles(t, "billing", map[string]string{
+			"payment.go": `package entity
+
+import "github.com/google/uuid"
+
+type Payment struct {
+	ID    uuid.UUID
+	Buyer Customer
+}
+`,
+			"customer.go": `package entity
+
+type Customer struct {
+	Self Customer
+}
+`,
+		})
+
+		// ===== Act ===== //
+		_, err := Parse(module, "payment")
+
+		// ===== Assert ===== //
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "cyclic value-object reference")
+	})
+
+	t.Run("errors when a value-object field references a struct that has its own primary key", func(t *testing.T) {
+		// ===== Arrange ===== //
+		module := makeTestMigrationModuleFiles(t, "billing", map[string]string{
+			"payment.go": `package entity
+
+import "github.com/google/uuid"
+
+type Payment struct {
+	ID   uuid.UUID
+	Cust Customer
+}
+`,
+			"customer.go": `package entity
+
+import "github.com/google/uuid"
+
+type Customer struct {
+	ID   uuid.UUID
+	Name string
+}
+`,
+		})
+
+		// ===== Act ===== //
+		_, err := Parse(module, "payment")
+
+		// ===== Assert ===== //
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "value object cannot declare a primary key")
+	})
+
+	t.Run("errors when a value-object field carries a pk annotation instead of bare ID", func(t *testing.T) {
+		// ===== Arrange ===== //
+		module := makeTestMigrationModuleFiles(t, "billing", map[string]string{
+			"payment.go": `package entity
+
+import "github.com/google/uuid"
+
+type Payment struct {
+	ID   uuid.UUID
+	Cust Customer
+}
+`,
+			"customer.go": `package entity
+
+type Customer struct {
+	Code string // pk
+}
+`,
+		})
+
+		// ===== Act ===== //
+		_, err := Parse(module, "payment")
+
+		// ===== Assert ===== //
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "value object cannot declare a primary key")
+	})
+
+	t.Run("rejects inline DSL on a value-object field", func(t *testing.T) {
+		// ===== Arrange ===== //
+		module := makeTestMigrationModuleFiles(t, "billing", map[string]string{
+			"payment.go": `package entity
+
+import "github.com/google/uuid"
+
+type Payment struct {
+	ID   uuid.UUID
+	Cust Customer // null
+}
+`,
+			"customer.go": `package entity
+
+type Customer struct {
+	Name string
+}
+`,
+		})
+
+		// ===== Act ===== //
+		_, err := Parse(module, "payment")
+
+		// ===== Assert ===== //
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "DSL annotations are not allowed on a value-object field")
+	})
+
+	t.Run("errors when a flattened value-object column collides with an existing column name", func(t *testing.T) {
+		// ===== Arrange ===== //
+		module := makeTestMigrationModuleFiles(t, "billing", map[string]string{
+			"payment.go": `package entity
+
+import "github.com/google/uuid"
+
+type Payment struct {
+	ID        uuid.UUID
+	CustName  string
+	Cust      Customer
+}
+`,
+			"customer.go": `package entity
+
+type Customer struct {
+	Name string
+}
+`,
+		})
+
+		// ===== Act ===== //
+		_, err := Parse(module, "payment")
+
+		// ===== Assert ===== //
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), `column "cust_name"`)
+	})
+
+	t.Run("keeps FK and enum semantics for fields nested inside a value object", func(t *testing.T) {
+		// ===== Arrange ===== //
+		module := makeTestMigrationModuleFiles(t, "billing", map[string]string{
+			"payment.go": `package entity
+
+import "github.com/google/uuid"
+
+type Payment struct {
+	ID   uuid.UUID
+	Cust Customer
+}
+`,
+			"customer.go": `package entity
+
+import "github.com/google/uuid"
+
+type Customer struct {
+	RoleID uuid.UUID
+	Status PaymentStatus
+}
+`,
+			"payment_status.go": `package entity
+
+type PaymentStatus string
+
+const (
+	PaymentPending PaymentStatus = "pending"
+	PaymentPaid    PaymentStatus = "paid"
+)
+`,
+		})
+
+		// ===== Act ===== //
+		schema, err := Parse(module, "payment")
+
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		require.Len(t, schema.Columns, 3)
+		assert.Equal(t, "cust_role_id", schema.Columns[1].Name)
+		assert.Equal(t, "cust_status", schema.Columns[2].Name)
+		assert.Equal(t, "VARCHAR(7)", schema.Columns[2].DataType)
+		assert.Equal(t, []ForeignKey{
+			{Column: "cust_role_id", RefTable: "roles", RefColumn: "id", OnDelete: ""},
+		}, schema.ForeignKeys)
+	})
+
+	t.Run("scopes composite group labels inside a value object by field path", func(t *testing.T) {
+		// ===== Arrange ===== //
+		module := makeTestMigrationModuleFiles(t, "billing", map[string]string{
+			"payment.go": `package entity
+
+import "github.com/google/uuid"
+
+type Payment struct {
+	ID     uuid.UUID
+	Buyer  Address
+	Seller Address
+}
+`,
+			"address.go": `package entity
+
+type Address struct {
+	City   string // unique:loc
+	Street string // unique:loc
+}
+`,
+		})
+
+		// ===== Act ===== //
+		schema, err := Parse(module, "payment")
+
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.Equal(t, [][]string{
+			{"buyer_city", "buyer_street"},
+			{"seller_city", "seller_street"},
+		}, schema.Uniques)
+	})
+
 	t.Run("reordering enum consts produces the same canonical Check", func(t *testing.T) {
 		// ===== Arrange ===== //
 		moduleA := makeTestMigrationModuleFiles(t, "billing", map[string]string{
@@ -518,6 +844,84 @@ const (
 		assert.NoError(t, errA)
 		assert.NoError(t, errB)
 		assert.Equal(t, schemaA.Columns, schemaB.Columns, "const declaration order must not affect generated SQL")
+	})
+}
+
+func Test_Migration_IsEntityFile(t *testing.T) {
+	t.Run("a struct with a bare ID field is an entity", func(t *testing.T) {
+		// ===== Arrange ===== //
+		module := makeTestMigrationModule(t, "billing", "payment.go", `package entity
+
+import "github.com/google/uuid"
+
+type Payment struct {
+	ID uuid.UUID
+}
+`)
+
+		// ===== Act ===== //
+		isEntity, err := IsEntityFile(module, "payment")
+
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.True(t, isEntity)
+	})
+
+	t.Run("a struct with a composite pk (no bare ID) is still an entity", func(t *testing.T) {
+		// ===== Arrange ===== //
+		module := makeTestMigrationModule(t, "billing", "membership.go", `package entity
+
+import "github.com/google/uuid"
+
+type Membership struct {
+	TeamID uuid.UUID // pk
+	UserID uuid.UUID // pk
+}
+`)
+
+		// ===== Act ===== //
+		isEntity, err := IsEntityFile(module, "membership")
+
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.True(t, isEntity)
+	})
+
+	t.Run("a struct with no primary key is a value object, not an entity", func(t *testing.T) {
+		// ===== Arrange ===== //
+		module := makeTestMigrationModule(t, "billing", "customer.go", `package entity
+
+type Customer struct {
+	Name  string
+	Email string
+}
+`)
+
+		// ===== Act ===== //
+		isEntity, err := IsEntityFile(module, "customer")
+
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.False(t, isEntity)
+	})
+
+	t.Run("a support file declaring no struct at all is still not an entity", func(t *testing.T) {
+		// ===== Arrange ===== //
+		module := makeTestMigrationModule(t, "billing", "payment_status.go", `package entity
+
+type PaymentStatus string
+
+const (
+	PaymentPending PaymentStatus = "pending"
+)
+`)
+
+		// ===== Act ===== //
+		isEntity, err := IsEntityFile(module, "payment_status")
+
+		// ===== Assert ===== //
+		assert.NoError(t, err)
+		assert.False(t, isEntity)
 	})
 }
 
