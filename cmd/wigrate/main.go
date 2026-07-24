@@ -209,6 +209,15 @@ anywhere in the entity's directory, is auto-detected as an enum. String enums
 become VARCHAR(n) sized to the longest label; int/iota enums become
 INTEGER/BIGINT. Either way the column gets a CHECK (col IN (...)) constraint.
 
+Value-object fields (no DSL token needed): a field typed as a named struct
+defined anywhere in the entity's directory, with no primary key of its own,
+is auto-detected as a value object and flattened into prefixed columns —
+Cust Customer{Name} on Payment -> cust_name, recursively to any depth
+(Buyer.Address.City -> buyer_address_city). Nested fields keep full DSL
+semantics (FK, enum, unique/index groups, scoped per value object). No DSL
+token is allowed on the struct-typed field itself. A struct WITH a primary
+key is a real entity, not a value object; referencing it as a field errors.
+
 Naming conventions:
   Struct/field PascalCase -> table/column snake_case, table names pluralized.
   FK column: fk_<table>_<refTable>. Unique constraint: uq_<table>_<column1>_<column2>...
@@ -216,7 +225,8 @@ Naming conventions:
   Trigram index: idx_<table>_<column>_trgm
   Enum CHECK: chk_<table>_<column>
 
-Supported Go types: string, int, int32, int64, bool, float32, float64, time.Time, uuid.UUID.
+Supported Go types: string, int, int32, int64, bool, float32, float64, time.Time, uuid.UUID,
+plus same-dir named enum and value-object structs.
 Limitations: no default-value DSL; PK changes (single or composite) are blocked in alter
 migrations (v1); composite foreign keys are not supported.
 
